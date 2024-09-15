@@ -1,0 +1,32 @@
+criterion:
+  model_class: built-in
+  type: BCEWithLogitsLoss
+data:
+  batch_size: 394
+  #data_path: [please provide the abs path to the dataset, it should include at least two meta files, test.tsv and test.txt, for inference] 
+  data_path: /mount/arbeitsdaten54/projekte/deepfake/fad/tomatoDD/example/example_data 
+  do_augment: false # if it's set to true, it won't augment the data anyway for inference
+  max_len: 4
+  model_class: GeneralFAD
+  num_workers: 8
+  test_batch_size: 128
+  test_num_workers: 1
+  transformation:
+    func: LFCC
+  upsample: true # it won't upsample the data during inference
+model:
+  cuda: 0 # the repo is under development, so please use export CUDA_VISIBLE_DEVICES=0 to set the GPU
+  model_class: MesoNet
+  num_classes: 1
+train:
+  beta1: 0.9
+  beta2: 0.999
+  log_interval: 20
+  lr: 0.0005
+  lr_gamma: 0.5
+  lr_step_size: 1000
+  max_epoch: 100
+  max_steps: 10000000000 
+  start_steps: 0
+  validate_interval: 100 
+  weight_decay: 0.0001
