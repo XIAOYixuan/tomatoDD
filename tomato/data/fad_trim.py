@@ -268,7 +268,7 @@ class GeneralFAD(FADTrim):
 
     def __init__(self, args: argparse.Namespace, split: str, train_mode: bool = True):
         super().__init__(args, split, train_mode)
-
+        logger.info(f"Dataset {args.data_path}, split: {split}")
     
     def _load_manifest(self, args):
         """ Has two columns

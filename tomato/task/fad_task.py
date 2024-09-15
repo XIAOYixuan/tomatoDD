@@ -350,6 +350,7 @@ class FADBaseTask(BaseTask):
         all_scores = all_scores.data.cpu().numpy()
         return uttids, all_labels, all_scores, logging_output
 
+    # TODO: use pd instead, then less code
     def _compute_eer_by_origin_ds(self, uttids, labels, scores, dataset):
         ds2labels = {}
         ds2scores = {}
@@ -369,6 +370,9 @@ class FADBaseTask(BaseTask):
         for ds in all_keys:
             labels = np.array(ds2labels[ds])
             scores = np.array(ds2scores[ds])
+            if len(set(labels)) == 1:
+                logger.info(f"Skip {ds} due to all labels are the same, EER is not meaningful")
+                continue
             eer, _ = self.train_strategy.compute_eer(labels, scores)
             logger.info(f"Validation EER of {ds}: {eer}")
             
@@ -557,7 +561,7 @@ class FADBaseTask(BaseTask):
         for uttid, score, label in zip(uttids, scores, all_labels):
             alldata.append([uttid, score, label])
         # check if preds and all_labels have the same shape
-        acc = np.mean((scores>threshold)== all_labels) 
+        acc = np.mean((scores>0.5)== all_labels) 
         #print("all_scores[:1].shape", all_scores[:, 1].shape)
         acc *= 100
         eer *= 100

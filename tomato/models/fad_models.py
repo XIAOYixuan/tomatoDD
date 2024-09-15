@@ -160,7 +160,6 @@ class MesoNet(ClassificationBase):
     def forward(self, source: dict, **kwargs) -> dict:
         super().forward(source)
         feats = source["feats"]
-        logger.info(f"feat shape: {feats.shape}")
         # print device of feats
 
         feats, feats_out = self.model(feats)

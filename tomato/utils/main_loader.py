@@ -51,7 +51,7 @@ def load_data(config_path: str, is_infer: bool = False):
         split_dataloader = DataLoader(split_dataset, 
                                 batch_size=data_args.test_batch_size, 
                                 shuffle=True,
-                                drop_last=True, 
+                                drop_last=False, 
                                 num_workers=data_args.test_num_workers,
                                 collate_fn=DatasetClass.collate_fn)
         return split_dataset, split_dataloader
