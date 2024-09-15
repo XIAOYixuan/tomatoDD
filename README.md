@@ -26,9 +26,8 @@ python infer.py
 - **`-c [config file path]`**:  
   The path to the config file.
 
-- **`-exp [experiment tag]`**:  
-  This parameter is used to group results from the same model across different datasets.  
-  It will create a directory named `exp` under `./output/infer/`, and store all the output results from this job in that directory.
+- **`-exp [experiment tag]`**:
+  This parameter should be removed in the future, it's designed for training. Just set it to "infer" for now.
 
 - **`-ckpt [checkpoint directory path]`**:  
   The path to the directory containing the model checkpoints.
@@ -36,9 +35,16 @@ python infer.py
 - **`-ckpt_tag [best/last]`**:  
   Choose whether to use the `best` or `last` checkpoint model for inference.
 
+- **`-o`**:
+  All inference results will be stored under this directory. Every run will generate a csv file containing prediction score and label for each audio sample.
+
 - **`-tag [job name]`**:  
   Assign a name to this job.  
   It will create a `.csv` file named after `tag` under `./output/infer/[exp]` ('exp' is defined by -exp) to store the results of this job.
 
 - **`-s [split]`**:  
   Specify which data split to use for inference.  (This repository is still under development, to avoid potential crashes, please only use the `test` split.)
+
+```bash
+$ python infer.py -task xent -c example/example.yaml -exp infer -ckpt output/ckpts/[dir] -ckpt_tag best -o output/infer/[dir] -tag [tag_name]  -s test
+```
