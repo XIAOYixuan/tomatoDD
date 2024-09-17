@@ -11,6 +11,7 @@ import torchaudio
 from torch.utils.data import Dataset
 import numpy as np
 
+from pathlib import Path
 from tomato.utils import logger
 
 class AudioDataset(Dataset):
@@ -26,10 +27,15 @@ class AudioDataset(Dataset):
         # recover from the last checkpoint
         self.fast_forward_mode = False
 
+        # process data_path, if it's an absolute path, we use it
+        # if it's a relative path, use the library path
+        data_path = Path(args.data_path)
+        if not data_path.is_absolute():
+            data_path = Path(__file__).parent.parent.parent / data_path
+            args.data_path = str(data_path)
+
     def __len__(self):
         raise NotImplementedError
 
     def __getitem__(self, idx):
         raise NotImplementedError
-    
-    
