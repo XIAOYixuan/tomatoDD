@@ -575,7 +575,7 @@ if __name__ == "__main__":
     # to cuda
     device = "cpu"
 
-    model = Wav2Vec2Model(device=device)
+    model = Wav2Vec2Model(device=device, num_classes=1)
     feat, feat_out = model(x)
     print(feat_out.shape)
     print(feat.shape)

@@ -4,6 +4,10 @@ This is the official repository for our research work on fake audio detection at
 
 Code and model ckpt for ICASSP24 submission is on the way ...
 
+## fairseq installation
+
+The codebase depends on models provided by [fairseq](https://github.com/facebookresearch/fairseq) with the commit `920a548ca770fb1a951f7f4289b4d3a0c1bc226f`. Please follow fairseq's `README.md` to install it.
+
 ## infer
 
 The `infer.py` script accepts the following parameters for inference tasks:

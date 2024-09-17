@@ -7,7 +7,7 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
-#import fairseq
+import fairseq
 
 from tomato.utils import logger
 
