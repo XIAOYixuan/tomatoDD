@@ -17,11 +17,10 @@ class MetaDatasetReader:
         self.fake_uttids = None
 
     @classmethod
-    def from_path(cls, path, split=None):
+    def from_path(cls, path, split):
         obj = cls()
         obj.path = Path(path)
-        if split is not None:
-            obj.read_splits([split])
+        obj.read_splits([split])
         obj.uttids = list(obj.uttid2info.keys())
         cls.show_statistics(obj)
         return obj
@@ -94,13 +93,14 @@ class MetaDatasetReader:
         """
         fake_split2uttids = self.sample_one_class(split_dict, "fake")
         real_split2uttids = self.sample_one_class(split_dict, "real")
-        self.split2uttids = {}
-        self.split2uttids.update(fake_split2uttids)
-        self.split2uttids.update(real_split2uttids)
-        return self.split2uttids 
-
+        self.split2uttids = fake_split2uttids
+        for split in real_split2uttids:
+            self.split2uttids[split].extend(real_split2uttids[split])
+        return self.split2uttids
+    
     def split_dataset(self, split_dict):
-        """ Split uttids based on the split_dict ratio
+        """ Split uttids based on the split_dict ratio,
+        return uttid
         """
         # dict: has {key: ratio}
         # e.g. {"train": 0.8, "dev": 0.1, "test": 0.1}
