@@ -136,36 +136,28 @@ class MesoNet(ClassificationBase):
 
     def __init__(self, args: Namespace):
         super().__init__(args)
-        from .predefined.meso_net import MesoInception4, W2V2MesoInception
+        from .predefined.meso_net import MesoInception4
         input_channels = getattr(args, 'input_channels', 1)
         fc1_dim = getattr(args, 'fc1_dim', 1024)
 
-        if self.frontend is None:
-            self.model = MesoInception4(
-                input_channels=input_channels,
-                fc1_dim=fc1_dim,
-                num_classes=self.num_classes,
-                frontend=self.frontend
-            )
-        elif self.frontend == "XLSR":
-            self.model = W2V2MesoInception(
-                input_channels=input_channels,
-                fc1_dim=fc1_dim,
-                num_classes=self.num_classes,
-                frontend=self.frontend
-            )
+        self.model = MesoInception4(
+            input_channels=input_channels,
+            fc1_dim=fc1_dim,
+            num_classes=self.num_classes,
+            frontend=self.frontend
+        )
 
         self.model.to(self.device)
 
     def forward(self, source: dict, **kwargs) -> dict:
+        # the super() class will run the frontend model if there is one
         super().forward(source)
         feats = source["feats"]
-        # print device of feats
-
+        #logger.info(f"feats shape: {feats.shape}")
         feats, feats_out = self.model(feats)
         # print output shape
-        #logger.info(f"feats shape: {feats.shape}")
-        #logger.info(f"feats_out shape: {feats_out.shape}")
+        # logger.info(f"feats shape: {feats.shape}")
+        # logger.info(f"feats_out shape: {feats_out.shape}")
         return {
             "feats": feats,
             "feats_out": feats_out
@@ -179,17 +171,31 @@ class MesoNet(ClassificationBase):
 
 if __name__ == "__main__":
     import numpy as np
-    # NCFT
-    x = np.random.randn(2, 401, 384).astype(np.float32)
-    x = torch.from_numpy(x)
-    # namespace, cuda:0
-    args = Namespace(cuda=0)
-    model = MesoNet(args)
-    source = {
-        "feats": x
-    }
-    out = model(source)
-    feat, feat_out = out["feats"], out["feats_out"] 
-    print(feat.shape)
-    print(feat_out.shape)
+    def use_acoustic_feat(): 
+        n, c, f, t = 2, 1, 401, 384
+        x = torch.rand(n, c, f, t)
+        args = Namespace(cuda=0)
+        model = MesoNet(args)
+        source = {
+            "feats": x
+        }
+        out = model(source)
+        feat, feat_out = out["feats"], out["feats_out"]
+        print(feat.shape)
+        print(feat_out.shape)
 
+    def use_facodec():
+        n, c, t = 4, 1, 64000
+        x = torch.rand(n, c, t)
+        args = Namespace(cuda=0, frontend="facodec")
+        # ncft after frontend: 4, 1, 256, 320
+        model = MesoNet(args)
+        source = {
+            "feats": x
+        }
+        out = model(source)
+        feat, feat_out = out["feats"], out["feats_out"]
+        print(feat.shape)
+        print(feat_out.shape)
+
+    use_acoustic_feat()

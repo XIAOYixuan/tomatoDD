@@ -8,26 +8,21 @@ import torch
 import torch.nn as nn
 import numpy as np
 import fairseq
+from einops import rearrange
 
 from tomato.utils import logger
-
-class BaseFrontEnd(nn.Module):
-
-    def __init__(self, device):
-        super(BaseFrontEnd, self).__init__()
-        pass
-
-    def extract_feat(self, input_data):
-        raise NotImplementedError
-
+from .base import BaseFrontEnd
 
 class XLSR(BaseFrontEnd):
 
-    def __init__(self,device):
+    def __init__(self, device, args=None):
         super(XLSR, self).__init__(device)
 
         # TODO: set the path in the config
-        cp_path = os.environ.get("XLSR_CP_PATH") 
+        if args is None:
+            cp_path = os.environ.get("XLSR_CP_PATH") 
+        else:
+            cp_path = args.frontend_path
         model, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([cp_path])
         self.model = model[0]
         self.device = device
@@ -41,13 +36,12 @@ class XLSR(BaseFrontEnd):
             self.model.to(input_data.device, dtype=input_data.dtype)
             self.model.train()
 
-        # if is not 2
-        if input_data.ndim != 2:
-            raise ValueError(f"input_data should be 2D, but got {input_data.ndim}D")
-        # [batch, length, dim]
+        # input_data: NCT
+        if input_data.shape[1] != 1:
+            raise ValueError(f"XLSR frontend only support single channel input, got {input_data.shape[1]} channels")
+        input_data = input_data.squeeze(1)
         emb = self.model(input_data, mask=False, features_only=True)['x']
-        # we need NCFT
-        #emb = emb.permute(0, 2, 1)
+        emb = rearrange(emb, 'n t f -> n 1 f t') 
         return emb
 
 
@@ -57,8 +51,9 @@ if __name__ == "__main__":
     xlsr = XLSR("cpu")
     
     bs = 3
+    c = 1
     wav_length = 64_000
-    x = np.random.rand(bs, wav_length).astype(np.float32)
-    x = torch.from_numpy(x)
+    x = torch.rand(bs, c, wav_length)
+    print(f"x shape {x.shape}")
     feat = xlsr.extract_feat(x)
     print(f"feat shape {feat.shape}")
