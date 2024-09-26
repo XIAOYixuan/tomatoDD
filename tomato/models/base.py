@@ -36,7 +36,9 @@ class ClassificationBase(BaseModel):
         if self.frontend is None:
             logger.info("No frontend model is specified")
         elif self.frontend == "XLSR":
-            self.frontend_model = frontend_models.XLSR(self.device)
+            self.frontend_model = frontend_models.XLSR(self.device, args)
+        elif self.frontend == "facodec":
+            self.frontend_model = frontend_models.FACodec(self.device, args)
         else:
             raise ValueError(f"Frontend {self.frontend} is not supported")
 
@@ -51,5 +53,6 @@ class ClassificationBase(BaseModel):
         feats = source["feats"] # NCT
         if self.frontend_model is not None:
             # NCT
-            feats = self.frontend_model.extract_feat(feats.squeeze(1))
-            source["feats"] = feats.unsqueeze(1)
+            feats = self.frontend_model.extract_feat(feats)
+            # NCFT
+            source["feats"] = feats
