@@ -1,4 +1,5 @@
-from .fad_models import ResNet, WhisperMeso, Wav2Vec2AASIST, PlainLCNN, MesoNet
+from .fad_models import ResNet, WhisperMeso, Wav2Vec2AASIST, PlainLCNN, MesoNet, AASIST
+from .megabyte import MegaByteFAD
 
 def get_model_class(class_name):
     if class_name == "ResNet":
@@ -11,5 +12,9 @@ def get_model_class(class_name):
         return Wav2Vec2AASIST 
     elif class_name == "MesoNet":
         return MesoNet
+    elif class_name == "AASIST":
+        return AASIST
+    elif class_name == "MegaByteFAD":
+        return MegaByteFAD
     else:
         raise ValueError("Unknown model class: {}".format(class_name))

@@ -19,7 +19,6 @@ class FactorizedVectorQuantize(nn.Module):
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
         self.commitment = commitment
-        print(f"dim {dim}, codebook_dim {codebook_dim}")
 
         if dim != self.codebook_dim:
             self.in_proj = weight_norm(nn.Linear(dim, self.codebook_dim))

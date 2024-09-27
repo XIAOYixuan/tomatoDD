@@ -32,7 +32,9 @@ class FADTrim(AudioDataset):
     def __init__(self, args: argparse.Namespace, split: str, train_mode: bool = True):
         super().__init__(args, split, train_mode)
         self.sample_rate = 16_000
-        self.max_len = getattr(args, "max_len", 4) * self.sample_rate
+        self.max_len = getattr(args, "max_samples", None)
+        if self.max_len is None:
+            self.max_len = getattr(args, "max_len", 4) * self.sample_rate
         logger.info(f"Max length: {self.max_len}. Note: if the transformation is used, and the features are read from the disk, the max_len will be ignored, because the audios are already trimmed before saved")
         # for visualization
         self.return_audio = getattr(args, "return_audio", False)

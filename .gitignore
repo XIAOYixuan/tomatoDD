@@ -180,3 +180,4 @@ pyrightconfig.json
 dataset_meta
 asset/*.pkl
 bak
+explore/
