@@ -19,10 +19,11 @@ class XLSR(BaseFrontEnd):
         super(XLSR, self).__init__(device)
 
         # TODO: set the path in the config
-        if args is None:
+        frontend_path = getattr(args, 'frontend_path', None)
+        if frontend_path is None:
             cp_path = os.environ.get("XLSR_CP_PATH") 
         else:
-            cp_path = args.frontend_path
+            cp_path = frontend_path
         model, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([cp_path])
         self.model = model[0]
         self.device = device

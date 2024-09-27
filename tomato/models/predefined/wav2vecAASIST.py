@@ -397,8 +397,8 @@ class Residual_block(nn.Module):
         return out
 
 
-class Wav2Vec2Model(nn.Module):
-    def __init__(self, device, num_classes):
+class AASIST(nn.Module):
+    def __init__(self, device, num_classes, dim_front_out):
         super().__init__()
         self.device = device
         
@@ -412,8 +412,7 @@ class Wav2Vec2Model(nn.Module):
         ####
         # create network wav2vec 2.0
         ####
-        self.ssl_model = XLSR(self.device)
-        self.LL = nn.Linear(self.ssl_model.out_dim, 128)
+        self.LL = nn.Linear(dim_front_out, 128)
 
         self.first_bn = nn.BatchNorm2d(num_features=1)
         self.first_bn1 = nn.BatchNorm2d(num_features=64)
@@ -473,8 +472,8 @@ class Wav2Vec2Model(nn.Module):
 
     def forward(self, x):
         #-------pre-trained Wav2vec model fine tunning ------------------------##
-        x_ssl_feat = self.ssl_model.extract_feat(x.squeeze(-1))
-        x = self.LL(x_ssl_feat) #(bs,frame_number,feat_out_dim)
+        #x_ssl_feat = self.ssl_model.extract_feat(x.squeeze(-1))
+        x = self.LL(x) #(bs,frame_number,feat_out_dim)
         
         # post-processing on front-end features
         x = x.transpose(1, 2)   #(bs,feat_out_dim,frame_number)
@@ -564,6 +563,17 @@ class Wav2Vec2Model(nn.Module):
         
         return last_hidden, output
 
+from deprecated import deprecated
+@deprecated(reason="Should add frontend in the ClassificationBase class")
+class Wav2Vec2Model(AASIST):
+
+    def __init__(self, device, num_classes):
+        self.ssl_model = XLSR(self.device)
+        super().__init__(device, num_classes, self.ssl_model.out_dim)
+
+    def forward(self, x):
+        x_ssl_feat = self.ssl_model.extract_feat(x.squeeze(-1))
+        return super().forward(x_ssl_feat)
 
 if __name__ == "__main__":
     import numpy as np

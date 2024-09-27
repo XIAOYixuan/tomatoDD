@@ -5,13 +5,7 @@
 
 from argparse import Namespace
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.init as init
-from torch.autograd import Function
-from torch import Tensor
-import os
-import numpy as np
+from einops import rearrange
 
 from .base import ClassificationBase
 from tomato.utils import utils, logger
@@ -99,7 +93,7 @@ class Wav2Vec2AASIST(ClassificationBase):
             "feats": feats, 
             "feats_out": feats_out
         }
-
+    
 
 class PlainLCNN(ClassificationBase):
     """ No blstm 
@@ -132,6 +126,36 @@ class PlainLCNN(ClassificationBase):
             "feats_out": feats_out
         }
 
+class AASIST(ClassificationBase):
+
+    def __init__(self, args: Namespace):
+        super().__init__(args)
+        from .predefined.wav2vecAASIST import AASIST
+        dim_front_out = getattr(args, 'dim_front_out', None)
+        if dim_front_out is None:
+            raise ValueError("dim_front_out must be specified")
+        self.model = AASIST(
+            device=self.device,
+            num_classes=self.num_classes,
+            dim_front_out=dim_front_out
+        )
+        self.model.to(self.device)
+
+    def forward(self, source: dict, **kwargs) -> dict:
+        super().forward(source)
+        feats = source["feats"]
+        #logger.info(f"feats shape: {feats.shape}")
+        # need NTF
+        if feats.shape[1] != 1:
+            raise ValueError("Input must be single channel")
+        feats = rearrange(feats, 'n 1 f t -> n t f')
+        feats, feats_out = self.model(feats)
+        return {
+            "feats": feats,
+            "feats_out": feats_out
+        }
+
+
 class MesoNet(ClassificationBase):
 
     def __init__(self, args: Namespace):
@@ -150,14 +174,9 @@ class MesoNet(ClassificationBase):
         self.model.to(self.device)
 
     def forward(self, source: dict, **kwargs) -> dict:
-        # the super() class will run the frontend model if there is one
         super().forward(source)
         feats = source["feats"]
-        #logger.info(f"feats shape: {feats.shape}")
         feats, feats_out = self.model(feats)
-        # print output shape
-        # logger.info(f"feats shape: {feats.shape}")
-        # logger.info(f"feats_out shape: {feats_out.shape}")
         return {
             "feats": feats,
             "feats_out": feats_out
@@ -171,11 +190,11 @@ class MesoNet(ClassificationBase):
 
 if __name__ == "__main__":
     import numpy as np
-    def use_acoustic_feat(): 
+    def use_acoustic_feat(MODEL): 
         n, c, f, t = 2, 1, 401, 384
         x = torch.rand(n, c, f, t)
         args = Namespace(cuda=0)
-        model = MesoNet(args)
+        model = MODEL(args)
         source = {
             "feats": x
         }
@@ -184,12 +203,25 @@ if __name__ == "__main__":
         print(feat.shape)
         print(feat_out.shape)
 
-    def use_facodec():
+    def use_facodec(MODEL):
         n, c, t = 4, 1, 64000
         x = torch.rand(n, c, t)
-        args = Namespace(cuda=0, frontend="facodec")
+        args = Namespace(cuda=0, frontend="facodec", dim_front_out=256, num_classes=1)
         # ncft after frontend: 4, 1, 256, 320
-        model = MesoNet(args)
+        model = MODEL(args)
+        source = {
+            "feats": x
+        }
+        out = model(source)
+        feat, feat_out = out["feats"], out["feats_out"]
+        print(feat.shape)
+        print(feat_out.shape)
+    
+    def use_xlsr(MODEL):
+        n, c, t = 4, 1, 64000
+        x = torch.rand(n, c, t)
+        args = Namespace(cuda=0, frontend="XLSR", dim_front_out=1024)
+        model = MODEL(args)
         source = {
             "feats": x
         }
@@ -198,4 +230,5 @@ if __name__ == "__main__":
         print(feat.shape)
         print(feat_out.shape)
 
-    use_acoustic_feat()
+    #use_xlsr(AASIST)
+    use_facodec(AASIST)

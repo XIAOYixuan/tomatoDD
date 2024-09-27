@@ -54,5 +54,6 @@ class ClassificationBase(BaseModel):
         if self.frontend_model is not None:
             # NCT
             feats = self.frontend_model.extract_feat(feats)
+            #logger.info(f"feats shape: {feats.shape}")
             # NCFT
             source["feats"] = feats
