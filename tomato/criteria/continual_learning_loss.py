@@ -10,6 +10,48 @@ import math
 from .base import BaseCriterion
 from tomato.utils import logger
 
+class OCBCELoss(BaseCriterion):
+
+    def __init__(self, args):
+        super().__init__(args)
+        self.m_real = getattr(args, "m_real", 0.9)
+        self.m_fake = getattr(args, "m_fake", 0.2)
+        self.alpha = getattr(args, "alpha", 20.0)
+        self.softplus = nn.Softplus()
+        self.bce = nn.BCEWithLogitsLoss()
+    
+    def forward(self, net_input: dict, net_output: dict, *kwargs):
+        scores = net_output["feats"]
+        pred = net_output["feats_out"]
+        targ = net_input["labels"]
+
+        # bce loss
+        if pred.ndim == 2:
+            pred = pred.squeeze(1)
+        loss = self.bce(pred, targ.float())
+
+        # oc loss
+        negative_scores = scores[targ == 0]
+        positive_scores = scores[targ == 1]
+        #logger.info(f"negative_scores: {negative_scores.shape}")
+        #logger.info(f"positive_scores: {positive_scores.shape}")
+
+        if negative_scores.shape[0] != 0:
+            #soft_scores = self.softplus(self.alpha * (self.m_real - negative_scores))
+            #mean_scores = soft_scores.mean()
+            #logger.info(f"soft_scores: {soft_scores.shape}")
+            #logger.info(f"mean_scores: {mean_scores.shape}")
+            loss = loss + self.softplus(self.alpha * (self.m_real - negative_scores)).mean()
+        if positive_scores.shape[0] != 0:
+            loss = loss + self.softplus(self.alpha * (positive_scores - self.m_fake)).mean()
+
+        return loss
+
+    def zero_logging_output(self):
+        return {
+            "loss": 0.0
+        }
+
 class OCSoftmax(BaseCriterion):
     """
     Trainable criterion for one-class classification
@@ -86,3 +128,23 @@ class OCSoftmax(BaseCriterion):
             "loss": 0.0,
         }
 
+
+if __name__ == "__main__":
+    from argparse import Namespace
+    args = Namespace()
+    ocbceloss = OCBCELoss(args)
+
+    scores = torch.randn(4, 30)
+    pred = torch.randn(4, 1)
+    targ = torch.randint(0, 2, (4,))
+
+    net_output = {
+        "feats": scores,
+        "feats_out": pred,
+    }
+    net_input = {
+        "labels": targ,
+    }
+
+    loss = ocbceloss(net_input, net_output)
+    print(loss)

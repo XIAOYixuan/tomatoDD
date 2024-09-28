@@ -3,11 +3,13 @@
 # 
 #
 from .base import BuiltInCriterion 
-from .continual_learning_loss import OCSoftmax
+from .continual_learning_loss import OCSoftmax, OCBCELoss
 
 def get_criterion_class(class_name):
     if class_name == "OCSoftmax":
         return OCSoftmax
+    elif class_name == "OCBCELoss":
+        return OCBCELoss
     elif class_name == "built-in":
         return BuiltInCriterion
     else:
