@@ -230,5 +230,5 @@ if __name__ == "__main__":
         print(feat.shape)
         print(feat_out.shape)
 
-    #use_xlsr(AASIST)
-    use_facodec(AASIST)
+    use_xlsr(AASIST)
+    #use_facodec(AASIST)

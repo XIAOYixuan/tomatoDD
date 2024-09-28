@@ -47,7 +47,7 @@ class ClassificationBase(BaseModel):
             for param in self.frontend_model.parameters():
                 param.requires_grad = False
 
-    def forward(self, source: dict, **kwargs) -> dict:
+    def forward_frontend(self, source: dict, **kwargs) -> dict:
         for key in source:
             source[key] = utils.move_to_cuda(source[key], self.device)
         feats = source["feats"] # NCT
@@ -57,3 +57,6 @@ class ClassificationBase(BaseModel):
             #logger.info(f"feats shape: {feats.shape}")
             # NCFT
             source["feats"] = feats
+    
+    def forward(self, source: dict, **kwargs) -> dict:
+        return self.forward_frontend(source, **kwargs)

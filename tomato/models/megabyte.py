@@ -71,6 +71,7 @@ class ResidualAttentionBlock(nn.Module):
         x = x + self.mlp(self.mlp_ln(x))
         return x
 
+
 class MegaByteFAD(ClassificationBase):
     # TODO: multi-task, predict the discrete id?
     def __init__(self, args: Namespace):
@@ -84,7 +85,9 @@ class MegaByteFAD(ClassificationBase):
         self.local_depth = getattr(args, 'local_depth', 4)
         self.max_len = getattr(args, 'max_len', 800)
         self.frame_level_fad = getattr(args, 'frame_level_fad', False)
-        
+        self.focus_domain = getattr(args, 'focus_domain', 'time') # could be freq, time, both
+        if self.frame_level_fad:
+            raise NotImplementedError("Need to adjust the code for frame-level cls, some updates such as focus_domain have conflicts")
 
         if self.max_len % self.patch_size != 0:
             raise ValueError("max_g_len must be divisible by patch size")
@@ -111,24 +114,46 @@ class MegaByteFAD(ClassificationBase):
         ])
         self.l_ln = nn.LayerNorm(self.dim_l_attn)
         
-        if self.patch_size*self.dim_emb != self.dim_g_attn:
-            self.g_proj = nn.Linear(self.dim_emb*self.patch_size, self.dim_g_attn)
-        else:
-            self.g_proj = None
-        if self.dim_emb != self.dim_l_attn:
-            self.l_proj = nn.Linear(self.dim_emb, self.dim_l_attn)
-        else:
-            self.l_proj = None
-
-        if self.frame_level_fad: 
-            self.predict_head = nn.Linear(self.dim_l_attn, self.num_classes)
-        else:
-            self.flatten_head = nn.Linear(self.dim_l_attn, 1)
-            self.frame_lvl_predict = nn.Tanh() 
-            self.predict_head = nn.Linear(self.max_len, self.num_classes)
+        self._add_attn_input_project()
+        self._prepare_predict_head()
+        self._extra_module_init()
 
         self.apply(self._init_weights)
         self.to(self.device)
+
+    def _extra_module_init(self):
+        pass
+
+    def _prepare_predict_head(self):
+        if self.frame_level_fad: 
+            self.predict_head = nn.Linear(self.dim_l_attn, self.num_classes)
+        else:
+            if self.focus_domain == 'time':
+                #input: n, t, d (reduce d)
+                self.flatten_head = nn.Linear(self.dim_l_attn, 1)
+                self.pred_tanh = nn.Tanh() 
+                self.predict_head = nn.Linear(self.max_len, self.num_classes)
+            elif self.focus_domain == "freq":
+                # input: n, t, d (reduce t)
+                self.flatten_head = nn.Linear(self.max_len, 1)
+                self.pred_tanh = nn.Tanh()
+                self.predict_head = nn.Linear(self.dim_l_attn, self.num_classes)
+
+    def _add_attn_input_project(self):
+        if self.patch_size*self.dim_emb != self.dim_g_attn:
+            self.g_proj = nn.Sequential(
+                nn.Linear(self.dim_emb*self.patch_size, self.dim_g_attn),
+                nn.GELU()
+            )
+        else:
+            self.g_proj = None
+        if self.dim_emb != self.dim_l_attn:
+            self.l_proj = nn.Sequential(
+                nn.Linear(self.dim_emb, self.dim_l_attn),
+                nn.GELU()
+            )
+        else:
+            self.l_proj = None
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -172,12 +197,14 @@ class MegaByteFAD(ClassificationBase):
             feats_out = self.predict_head(feats)
             return feats, feats_out
         else:
+            if self.focus_domain == 'freq':
+                feats = rearrange(feats, 'n t d -> n d t')
             feats = self.flatten_head(feats)
             feats = feats.squeeze(-1)
-            feats_pred = self.frame_lvl_predict(feats)
+            feats_pred = self.pred_tanh(feats)
             feats_out = self.predict_head(feats_pred)
             return feats, feats_out
-
+        
     def forward(self, input_dict):
         super().forward(input_dict)
         x = input_dict["feats"]
@@ -202,6 +229,131 @@ class MegaByteFAD(ClassificationBase):
             "feats_out": feats_out
         }
     
+
+class OCMegaByte(MegaByteFAD):
+
+    def __init__(self, args: Namespace):
+        super().__init__(args)
+        if self.focus_domain != 'time':
+            raise ValueError("Only time focus domain is supported in OC model")
+
+    def _extra_module_init(self):
+        self.m_real = getattr(self.args, 'm_real', 0.5)
+        self.m_fake = getattr(self.args, 'm_fake', 0.5)
+        self.alpha = getattr(self.args, 'alpha', 20.0)
+        self.center = nn.Parameter(torch.randn(1, self.dim_l_attn))
+        self.softplus = nn.Softplus()
+
+    def _init_weights(self, module):
+        super()._init_weights(module)
+        nn.init.kaiming_uniform_(self.center, 0.25)
+
+    def _prepare_predict_head(self):
+        if self.frame_level_fad:
+            self.predict_head = None
+        else:
+            self.predict_head = nn.Linear(self.max_len, self.num_classes)
+
+    def _oc_forward(self, x):
+        # x: B, T, D (dim_l_attn)
+        b, t, d = x.shape
+        x = rearrange(x, 'b t d -> (b t) d')
+        w = F.normalize(self.center, p=2, dim=1)
+        x = F.normalize(x, p=2, dim=1)
+
+        scores = x @ w.transpose(0, 1)
+        scores = rearrange(scores, '(b t) 1 -> b t', b=b)
+        return scores
+    
+    def predict_forward(self, x):
+        scores = self._oc_forward(x)
+        if self.frame_level_fad:
+            raise ValueError("Frame level FAD is not supported in OC model")
+        else:
+            feats_out = self.predict_head(scores)
+            return scores, feats_out
+
+
+class LGMegaByte(MegaByteFAD):
+
+    def __init__(self, args: Namespace):
+        super().__init__(args)
+        if self.focus_domain != 'time':
+            raise ValueError("Only time focus domain is supported in LGMegaByte")
+
+    def _extra_module_init(self):
+        self.g_pos = nn.Parameter(torch.randn(self.max_len//self.patch_size, self.dim_l_attn*self.patch_size))
+        self.l2g_gelu = nn.GELU()
+
+    def _prepare_predict_head(self):
+        if self.frame_level_fad:
+            self.predict_head = nn.Linear(self.dim_g_attn, self.num_classes)
+        else:
+            self.flatten_head = nn.Linear(self.dim_g_attn, 1)
+            self.frame_lvl_predict = nn.Tanh() 
+            self.predict_head = nn.Linear(self.max_len//self.patch_size, self.num_classes)
+
+    def _add_attn_input_project(self):
+        if self.patch_size*self.dim_l_attn != self.dim_g_attn:
+            self.g_proj = nn.Sequential(
+                nn.Linear(self.dim_l_attn*self.patch_size, self.dim_g_attn),
+                nn.GELU()
+            )
+        else:
+            self.g_proj = None
+        if self.dim_emb != self.dim_l_attn:
+            self.l_proj = nn.Sequential(
+                nn.Linear(self.dim_emb, self.dim_l_attn),
+                nn.GELU()
+            )
+        else:
+            self.l_proj = None
+
+    def local_forward(self, x):
+        x = x + self.l_pos
+        if self.l_proj:
+            x = self.l_proj(x)
+        for layer in self.l_layers:
+            x = layer(x)
+        x = self.l2g_gelu(x)
+        x = self.l_ln(x)
+        return x
+    
+    def global_forward(self, x):
+        # x : n, t, D
+        x = x + self.g_pos[:x.shape[1], :].unsqueeze(0)
+        if self.g_proj:
+            x = self.g_proj(x)
+        for layer in self.g_layers:
+            x = layer(x)
+        x = self.g_ln(x)
+        return x
+
+    def forward(self, input_dict):
+        self.forward_frontend(input_dict)
+        x = input_dict["feats"]
+        # N, C, F, T
+        if x.shape[1] != 1:
+            raise ValueError("Only single channel audio is supported")
+        x = rearrange(x, 'n 1 f t -> n f t')
+        if x.shape[2] % self.patch_size != 0:
+            raise ValueError(f"Input length {x.shape[2]} ({x.shape}) must be divisible by patch size")
+        N, F, T = x.shape
+        #logger.info(f"x.shape: {x.shape}") 
+        x = rearrange(x, 'n f (t p) -> (n t) p f', p = self.patch_size)
+        #logger.info(f"(n t) p f: x.shape: {x.shape}")
+        x = self.local_forward(x)
+        #logger.info(f"local_forward: x.shape: {x.shape}")
+
+        num_patches = T // self.patch_size
+        x = rearrange(x, '(n t) p f -> n t (p f)', t = num_patches, p = self.patch_size)
+        x = self.global_forward(x)
+        feats, feats_out = self.predict_forward(x)
+        return {
+            "feats": feats,
+            "feats_out": feats_out
+        }
+    
 if __name__ == "__main__":
 
     def use_frontend(frontend: str, dim_frontend: int, max_len: int = 200):
@@ -211,9 +363,12 @@ if __name__ == "__main__":
             cuda=0,
             frontend=frontend,
             dim_embed=dim_frontend,
-            max_len=max_len
+            max_len=max_len,
+            #focus_domain="freq",
         )
-        model = MegaByteFAD(args)
+        #model = MegaByteFAD(args)
+        #model = LGMegaByte(args)
+        model = OCMegaByte(args)
         source = {
             "feats": x
         }
