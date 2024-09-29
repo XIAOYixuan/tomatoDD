@@ -72,26 +72,28 @@ class ResidualAttentionBlock(nn.Module):
         return x
 
 
-class MegaByteFAD(ClassificationBase):
-    # TODO: multi-task, predict the discrete id?
+class MegaByteFeat(nn.Module):
+
     def __init__(self, args: Namespace):
-        super().__init__(args)
+        super().__init__()
+        self.patch_size = getattr(args, 'patch_size', 4)
+        self.n_head = getattr(args, 'n_head', 8)
         self.patch_size = getattr(args, 'patch_size', 4)
         self.n_head = getattr(args, 'n_head', 8) # number of attention heads
         self.dim_l_attn = getattr(args, 'dim_attn', 64)
         self.dim_g_attn = self.dim_l_attn * self.patch_size
         self.dim_emb = getattr(args, 'dim_embed', 256) # embedding dim, the dim of frontend out or acoustic feat
-        self.global_depth = getattr(args, 'global_depth', 8)
-        self.local_depth = getattr(args, 'local_depth', 4)
+        self.global_depth = getattr(args, 'global_depth', 4)
+        self.local_depth = getattr(args, 'local_depth', 2)
         self.max_len = getattr(args, 'max_len', 800)
-        self.frame_level_fad = getattr(args, 'frame_level_fad', False)
-        self.focus_domain = getattr(args, 'focus_domain', 'time') # could be freq, time, both
-        if self.frame_level_fad:
-            raise NotImplementedError("Need to adjust the code for frame-level cls, some updates such as focus_domain have conflicts")
-
+        self.focus_domain = getattr(args, 'focus_domain', 'time') # could be freq, time
+        if self.focus_domain == 'freq':
+            # transpose the input from ncft to nctf
+            # swap dim_emb and max_len
+            self.dim_emb, self.max_len = self.max_len, self.dim_emb
         if self.max_len % self.patch_size != 0:
-            raise ValueError("max_g_len must be divisible by patch size")
-
+            raise ValueError(f"max_len {self.max_len} must be divisible by patch size")
+        
         # global transformer
         self.g_sos = nn.Parameter(torch.randn(1, self.patch_size * self.dim_emb))
         self.g_pos = nn.Parameter(torch.randn(self.max_len//self.patch_size, self.dim_emb*self.patch_size))
@@ -113,32 +115,8 @@ class MegaByteFAD(ClassificationBase):
             ) for _ in range(self.local_depth)
         ])
         self.l_ln = nn.LayerNorm(self.dim_l_attn)
-        
         self._add_attn_input_project()
-        self._prepare_predict_head()
-        self._extra_module_init()
-
-        self.apply(self._init_weights)
-        self.to(self.device)
-
-    def _extra_module_init(self):
-        pass
-
-    def _prepare_predict_head(self):
-        if self.frame_level_fad: 
-            self.predict_head = nn.Linear(self.dim_l_attn, self.num_classes)
-        else:
-            if self.focus_domain == 'time':
-                #input: n, t, d (reduce d)
-                self.flatten_head = nn.Linear(self.dim_l_attn, 1)
-                self.pred_tanh = nn.Tanh() 
-                self.predict_head = nn.Linear(self.max_len, self.num_classes)
-            elif self.focus_domain == "freq":
-                # input: n, t, d (reduce t)
-                self.flatten_head = nn.Linear(self.max_len, 1)
-                self.pred_tanh = nn.Tanh()
-                self.predict_head = nn.Linear(self.dim_l_attn, self.num_classes)
-
+    
     def _add_attn_input_project(self):
         if self.patch_size*self.dim_emb != self.dim_g_attn:
             self.g_proj = nn.Sequential(
@@ -154,7 +132,7 @@ class MegaByteFAD(ClassificationBase):
             )
         else:
             self.l_proj = None
-
+        
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -190,25 +168,12 @@ class MegaByteFAD(ClassificationBase):
         x = self.l_ln(x)
         x = rearrange(x, '(n t) p d -> n (t p) d', t=t)
         return x
+    
+    def forward(self, x):
+        # feat shape n 1 f t
+        if self.focus_domain == 'freq':
+            x = rearrange(x, 'n 1 f t -> n 1 t f')
 
-    def predict_forward(self, feats):
-        # shape: n, t, d
-        if self.frame_level_fad:
-            feats_out = self.predict_head(feats)
-            return feats, feats_out
-        else:
-            if self.focus_domain == 'freq':
-                feats = rearrange(feats, 'n t d -> n d t')
-            feats = self.flatten_head(feats)
-            feats = feats.squeeze(-1)
-            feats_pred = self.pred_tanh(feats)
-            feats_out = self.predict_head(feats_pred)
-            return feats, feats_out
-        
-    def forward(self, input_dict):
-        super().forward(input_dict)
-        x = input_dict["feats"]
-        # N, C, F, T
         if x.shape[1] != 1:
             raise ValueError("Only single channel audio is supported")
         x = rearrange(x, 'n 1 f t -> n f t')
@@ -223,6 +188,76 @@ class MegaByteFAD(ClassificationBase):
 
         x = rearrange(x, 'n t (p f) -> (n t) p f', p=self.patch_size)
         x = self.local_forward(x, out_global)
+        # x shape: n, t, d (dim_l_attn)
+        return x
+    
+
+class MegaByteFAD(ClassificationBase):
+    # TODO: multi-task, predict the discrete id?
+    def __init__(self, args: Namespace):
+        super().__init__(args)
+
+        self.feat_bn = nn.BatchNorm2d(num_features=1)
+        self.feat_selu = nn.SELU(inplace=True)
+        global_depth = getattr(args, 'global_depth', 8)
+        local_depth = getattr(args, 'local_depth', 4)
+        # update global_depth and local_depth
+        args.global_depth = global_depth
+        args.local_depth = local_depth
+        self.mega_feat = MegaByteFeat(args)
+        self.frame_level_fad = getattr(args, 'frame_level_fad', False)
+        if self.frame_level_fad:
+            raise NotImplementedError("Need to adjust the code for frame-level cls, some updates such as focus_domain have conflicts")
+
+        self._prepare_predict_head()
+        self._extra_module_init()
+
+        self.apply(self._init_weights)
+        self.to(self.device)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Parameter):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def _extra_module_init(self):
+        pass
+
+    def _prepare_predict_head(self):
+        if self.frame_level_fad: 
+            self.predict_head = nn.Linear(self.mega_feat.dim_l_attn, self.num_classes)
+        else:
+            self.flatten_head = nn.Linear(self.mega_feat.dim_l_attn, 1)
+            self.pred_tanh = nn.Tanh() 
+            self.predict_head = nn.Linear(self.mega_feat.max_len, self.num_classes)
+
+    def predict_forward(self, feats):
+        # shape: n, t, d
+        if self.frame_level_fad:
+            feats_out = self.predict_head(feats)
+            return feats, feats_out
+        else:
+            feats = self.flatten_head(feats)
+            feats = feats.squeeze(-1)
+            feats_pred = self.pred_tanh(feats)
+            feats_out = self.predict_head(feats_pred)
+            return feats, feats_out
+        
+    def forward(self, input_dict):
+        super().forward(input_dict)
+        x = input_dict["feats"]
+
+        # post processing the front-end features
+        # reference: wav2vecAASIST model
+        # n c f t
+        x = F.max_pool2d(x, (3, 3))
+        x = self.feat_bn(x)
+        x = self.feat_selu(x)
+
+        x = self.mega_feat(x)
         feats, feats_out = self.predict_forward(x)
         return {
             "feats": feats,
@@ -356,6 +391,25 @@ class LGMegaByte(MegaByteFAD):
     
 if __name__ == "__main__":
 
+    def use_acoustic(dim_embed: 128, max_len: int = 200):
+        n, c, f, t = 2, 1, 128, max_len
+        x = torch.rand(n, c, f, t)
+        args = Namespace(
+            cuda=0,
+            dim_embed=dim_embed,
+            max_len=max_len,
+            focus_domain="freq",
+        )
+        model = MegaByteFAD(args)
+        print(model)
+        source = {
+            "feats": x
+        }
+        out = model(source)
+        feat, feat_out = out["feats"], out["feats_out"]
+        print(feat.shape)
+        print(feat_out.shape)
+
     def use_frontend(frontend: str, dim_frontend: int, max_len: int = 200):
         n, c, t = 4, 1, 64320
         x = torch.rand(n, c, t)
@@ -364,11 +418,13 @@ if __name__ == "__main__":
             frontend=frontend,
             dim_embed=dim_frontend,
             max_len=max_len,
+            patch_size=3
             #focus_domain="freq",
         )
-        #model = MegaByteFAD(args)
+        model = MegaByteFAD(args)
+        print(model)
         #model = LGMegaByte(args)
-        model = OCMegaByte(args)
+        #model = OCMegaByte(args)
         source = {
             "feats": x
         }
@@ -378,4 +434,6 @@ if __name__ == "__main__":
         print(feat_out.shape)
 
     #use_frontend("facodec", 256)
-    use_frontend("XLSR", 1024)
+    #use_frontend("XLSR", 1024)
+    use_frontend("XLSR", 341, 66)
+    #use_acoustic(128, 200)
