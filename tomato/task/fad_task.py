@@ -561,7 +561,7 @@ class FADBaseTask(BaseTask):
         for uttid, score, label in zip(uttids, scores, all_labels):
             alldata.append([uttid, score, label])
         # check if preds and all_labels have the same shape
-        acc = np.mean((scores>0.5)== all_labels) 
+        acc = np.mean((scores>0)== all_labels) 
         #print("all_scores[:1].shape", all_scores[:, 1].shape)
         acc *= 100
         eer *= 100

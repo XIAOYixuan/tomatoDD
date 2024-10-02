@@ -37,6 +37,8 @@ class ClassificationBase(BaseModel):
             logger.info("No frontend model is specified")
         elif self.frontend == "XLSR":
             self.frontend_model = frontend_models.XLSR(self.device, args)
+        elif self.frontend == "HuBERT":
+            self.frontend_model = frontend_models.HuBERT(self.device, args)
         elif self.frontend == "facodec":
             self.frontend_model = frontend_models.FACodec(self.device, args)
         else:
