@@ -3,6 +3,8 @@
 # Based on UniAudio implementation: https://github.com/yangdongchao/UniAudio/blob/main/UniAudio/model.py
 # Adapted by: Yixuan Xiao
 from argparse import Namespace
+from dataclasses import dataclass
+from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,22 +29,24 @@ class MultiHeadAttention(nn.Module):
         self.value = nn.Linear(dim_hidden, dim_hidden)
         self.out = nn.Linear(dim_hidden, dim_hidden)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, y: torch.Tensor = None) -> torch.Tensor:
         N, L, D = x.shape # N could be B (global) or BT(local)
         
-        q = self.query(x)
-        k = self.key(x)
-        v = self.value(x)
+        if y is None:
+            y = x
+        q = self.query(x) # N, Lx, D
+        k = self.key(y) # N, Ly, D
+        v = self.value(y) # N, Ly, D
 
         scale = (D // self.n_head) ** -0.25
-        q = rearrange(q, 'n l (h d) -> n h l d', h=self.n_head) * scale
-        k = rearrange(k, 'n l (h d) -> n h d l', h=self.n_head) * scale
-        v = rearrange(v, 'n l (h d) -> n h l d', h=self.n_head) * scale
+        q = rearrange(q, 'n x (h d) -> n h x d', h=self.n_head) * scale
+        k = rearrange(k, 'n y (h d) -> n h d y', h=self.n_head) * scale
+        v = rearrange(v, 'n y (h d) -> n h y d', h=self.n_head) * scale
 
-        qk = q @ k
-        w = F.softmax(qk, dim=-1)
-        wv = w @ v
-        wv = rearrange(wv, 'n h l d -> n l (h d)')
+        qk = q @ k # n, h, x, y
+        w = F.softmax(qk, dim=-1) # n, h, x, y
+        wv = w @ v # n, h, x, d
+        wv = rearrange(wv, 'n h x d -> n x (h d)')
         return self.out(wv)
 
 
@@ -52,11 +56,15 @@ class ResidualAttentionBlock(nn.Module):
             self, 
             dim_hidden: int, 
             n_head: int,
+            cross_attn: bool = False 
             ) -> None:
         super().__init__()
 
+        self.cross_attn = cross_attn
         self.attn = MultiHeadAttention(dim_hidden, n_head)
         self.attn_ln = nn.LayerNorm(dim_hidden)
+        if cross_attn:
+            self.attn_kv_ln = nn.LayerNorm(dim_hidden)
 
         dim_mlp = dim_hidden * 4
         self.mlp = nn.Sequential(
@@ -66,8 +74,15 @@ class ResidualAttentionBlock(nn.Module):
         )
         self.mlp_ln = nn.LayerNorm(dim_hidden)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.attn_ln(x))
+    def forward(self, x: torch.Tensor, y: torch.Tensor = None) -> torch.Tensor:
+        if y is None:
+            if self.cross_attn:
+                raise ValueError("Cross attention requires two inputs")
+            y = x
+        if self.cross_attn:
+            x = x + self.attn(self.attn_ln(x), self.attn_kv_ln(y))
+        else:
+            x = x + self.attn(self.attn_ln(x))
         x = x + self.mlp(self.mlp_ln(x))
         return x
 
@@ -388,7 +403,150 @@ class LGMegaByte(MegaByteFAD):
             "feats": feats,
             "feats_out": feats_out
         }
+
+from copy import deepcopy
+class TimeFreqMega(ClassificationBase):
+
+    def __init__(self, args:Namespace):
+        super().__init__(args)
+
+        time_args = deepcopy(args)
+        time_args.focus_domain = 'time'
+        self.time_feat = MegaByteFeat(time_args)
+        freq_args = deepcopy(args)
+        freq_args.focus_domain = 'freq'
+        self.freq_feat = MegaByteFeat(freq_args)
+        self.max_len = self.time_feat.max_len
+
+        self.cross_time_attn= ResidualAttentionBlock(
+            dim_hidden=self.time_feat.dim_l_attn,
+            n_head=self.time_feat.n_head,
+            cross_attn=True 
+        )
+        self._prep_decision_making_module()
+        self.to(self.device)
+
+    def _prep_decision_making_module(self):
+        self.flatten_ln = nn.LayerNorm(self.time_feat.dim_l_attn)
+        self.flatten_head = nn.Linear(self.time_feat.dim_l_attn, 1)
+        self.pred_tanh = nn.Tanh() 
+        self.pred_head = nn.Linear(self.time_feat.max_len, self.num_classes)
+
+    def _forward_decision(self, fusion_feat):
+        flatten = self.flatten_head(self.flatten_ln(fusion_feat)) # n t 1
+        flatten = flatten.squeeze(-1) # n t
+        y = self.pred_tanh(flatten)
+        y = self.pred_head(y)
+        return flatten, y
+
+    def forward(self, source: dict, **kwargs) -> dict:
+        super().forward(source)
+        feats = source["feats"] # ncft
+        time_feats = self.time_feat(feats) # n t d
+        freq_feats = self.freq_feat(feats) # n f d
+        fusion_feat =  self.cross_time_attn(time_feats, freq_feats) # n t d
+
+        feats, feats_out = self._forward_decision(fusion_feat)
+        return {
+            "feats": feats,
+            "feats_out": feats_out
+        }
     
+
+class TimeFreqConvHead(TimeFreqMega):
+
+    @dataclass
+    class ConvParams:
+        c_in: int
+        c_out: int
+        k_size: Tuple[int, int] 
+        s_size: Tuple[int, int]
+        pool_k: Tuple[int, int] 
+        pool_s: Tuple[int, int] 
+
+    def __init__(self, args:Namespace):
+        super().__init__(args)
+
+    # nchw
+    def _cal_hw_out(self, in_l, k_size, s_size):
+        return (in_l - k_size) // s_size + 1
+    
+
+    def _prep_decision_making_module(self):
+        # suppose input len is 200
+        time_params = self.ConvParams(
+            c_in=1,
+            c_out=64,
+            k_size=(5, 1),
+            s_size=(3, 1),
+            pool_k=(3, 1),
+            pool_s=(2, 1)
+        )
+        # extract freq pattern across time
+        self.time_conv = nn.Sequential(
+            nn.Conv2d(in_channels=time_params.c_in,
+                      out_channels=time_params.c_out,
+                      kernel_size=time_params.k_size,
+                        stride=time_params.s_size,
+                        bias=False),
+            nn.LeakyReLU(),
+            nn.BatchNorm2d(time_params.c_out),
+            nn.MaxPool2d(kernel_size=time_params.pool_k,
+                         stride=time_params.pool_s)
+        )
+        # find channel level 2d pattern
+        channel_params = self.ConvParams(
+            c_in=time_params.c_out,
+            c_out=time_params.c_out,
+            k_size=(5, 5),
+            s_size=(3, 3),
+            pool_k=(3, 3),
+            pool_s=(2, 2)
+        )
+        self.channel_conv = nn.Sequential(
+            nn.Conv2d(in_channels=channel_params.c_in,
+                      out_channels=channel_params.c_out,
+                      kernel_size=channel_params.k_size,
+                      stride=channel_params.s_size,
+                      groups=channel_params.c_in,
+                      bias=False),
+            nn.LeakyReLU(),
+            nn.BatchNorm2d(channel_params.c_out),
+            nn.MaxPool2d(kernel_size=channel_params.pool_k,
+                         stride=channel_params.pool_s)
+        ) # encoder would be better
+        # n c t f -> n c (t f)
+        # TODO: hard code the output size
+        self.channel_pool = nn.Sequential(
+            nn.Conv1d(
+                in_channels=channel_params.c_out,
+                out_channels=channel_params.c_out,
+                kernel_size=36, #(t f)
+                groups=channel_params.c_out,
+                bias=False
+            ),
+            nn.Tanh(),
+        )
+        # n c 1
+        self.pred_head = nn.Linear(channel_params.c_out, self.num_classes)
+    
+    def _forward_decision(self, x):
+        # [n t d]
+        x = rearrange(x, 'n t d -> n 1 t d')
+        #logger.info(f"x.shape: {x.shape}")
+        x = self.time_conv(x)
+        #logger.info(f"time_conv: {x.shape}")
+        x = self.channel_conv(x) # n, c, 7, 10
+        #logger.info(f"channel_conv: {x.shape}")
+        x = rearrange(x, 'n c t f -> n c (t f)')
+        x = self.channel_pool(x)
+        #logger.info(f"channel_pool: {x.shape}")
+        feats = x.squeeze(-1) # n c
+        feats_out = self.pred_head(feats)
+        return feats, feats_out
+
+
+
 if __name__ == "__main__":
 
     def use_acoustic(dim_embed: 128, max_len: int = 200):
@@ -398,7 +556,7 @@ if __name__ == "__main__":
             cuda=0,
             dim_embed=dim_embed,
             max_len=max_len,
-            focus_domain="freq",
+            #focus_domain="freq",
         )
         model = MegaByteFAD(args)
         print(model)
@@ -418,13 +576,17 @@ if __name__ == "__main__":
             frontend=frontend,
             dim_embed=dim_frontend,
             max_len=max_len,
-            patch_size=3
+            patch_size=4
             #focus_domain="freq",
         )
-        model = MegaByteFAD(args)
-        print(model)
+        #model = MegaByteFAD(args)
         #model = LGMegaByte(args)
         #model = OCMegaByte(args)
+        model = TimeFreqConvHead(args)
+
+        # print param's name and shape
+        for name, param in model.named_parameters():
+            print(name, param.shape)
         source = {
             "feats": x
         }
@@ -434,6 +596,6 @@ if __name__ == "__main__":
         print(feat_out.shape)
 
     #use_frontend("facodec", 256)
-    #use_frontend("XLSR", 1024)
-    use_frontend("XLSR", 341, 66)
+    use_frontend("XLSR", 1024, 200)
+    #use_frontend("XLSR", 341, 66)
     #use_acoustic(128, 200)

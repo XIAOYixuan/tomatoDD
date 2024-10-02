@@ -1,5 +1,5 @@
 from .fad_models import ResNet, WhisperMeso, Wav2Vec2AASIST, PlainLCNN, MesoNet, AASIST
-from .megabyte import MegaByteFAD, LGMegaByte, OCMegaByte
+from .megabyte import MegaByteFAD, LGMegaByte, OCMegaByte, TimeFreqMega, TimeFreqConvHead
 
 def get_model_class(class_name):
     if class_name == "ResNet":
@@ -20,5 +20,9 @@ def get_model_class(class_name):
         return LGMegaByte
     elif class_name == "OCMegaByte":
         return OCMegaByte
+    elif class_name == "TimeFreqMega":
+        return TimeFreqMega
+    elif class_name == "TimeFreqConvHead":
+        return TimeFreqConvHead
     else:
         raise ValueError("Unknown model class: {}".format(class_name))
