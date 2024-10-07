@@ -11,6 +11,7 @@ from torch.autograd import Function
 from torch import Tensor
 import os
 import numpy as np
+from einops import rearrange
 
 class MaxFeatureMap2D(nn.Module):
     """ Max feature map (along 2D)
@@ -65,6 +66,14 @@ class PlainLCNN(nn.Module):
         super(PlainLCNN, self).__init__()
         self.enc_dim = enc_dim 
         self.nclasses = nclasses
+        if feat_len != F_len:
+            self.frontend_preprocess = nn.Sequential(
+                nn.Linear(feat_len, F_len),
+                nn.BatchNorm2d(num_features=1),
+                nn.SELU(inplace=True),
+            )
+        else:
+            self.frontend_preprocess = None
         self.conv1 = nn.Sequential(nn.Conv2d(1, 64, (5, 5), 1, padding=(2, 2)),
                                    MaxFeatureMap2D(),
                                    nn.MaxPool2d((2, 2), (2, 2)))
@@ -100,6 +109,11 @@ class PlainLCNN(nn.Module):
         self.fc_mu = nn.Linear(self.enc_dim, nclasses) if nclasses >= 2 else nn.Linear(self.enc_dim, 1)
 
     def forward(self, x):
+        if self.frontend_preprocess is not None:
+            # NCFT
+            x = rearrange(x, 'n c f t -> n c t f')
+            x = self.frontend_preprocess(x)
+            x = rearrange(x, 'n c t f -> n c f t')
         # NCFT
         #print("input", x.shape)
         x = self.conv1(x)
@@ -131,11 +145,13 @@ class PlainLCNN(nn.Module):
 if __name__ == "__main__":
     import numpy as np
     # NCFT
-    x = np.random.randn(2, 1, 401, 60).astype(np.float32)
+    x = np.random.randn(2, 1, 1024, 401).astype(np.float32)
     x = torch.from_numpy(x)
     model = PlainLCNN(enc_dim=256,
-                      feat_len=401,
-                      nclasses=2)
+                      feat_len=1024,
+                      nclasses=2, 
+                      F_len=128,
+                      T_len=401)
     feat, feat_out = model(x)
     print(feat.shape)
     print(feat_out.shape)
