@@ -1,6 +1,6 @@
 from .fad_models import ResNet, WhisperMeso, Wav2Vec2AASIST, PlainLCNN, MesoNet, AASIST
 from .megabyte import MegaByteFAD, LGMegaByte, OCMegaByte, TimeFreqMega, TimeFreqConvHead
-
+from .conv_timefreq import ConvFreqTime
 def get_model_class(class_name):
     if class_name == "ResNet":
         return ResNet 
@@ -24,5 +24,7 @@ def get_model_class(class_name):
         return TimeFreqMega
     elif class_name == "TimeFreqConvHead":
         return TimeFreqConvHead
+    elif class_name == "ConvFreqTime":
+        return ConvFreqTime
     else:
         raise ValueError("Unknown model class: {}".format(class_name))

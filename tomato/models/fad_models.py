@@ -116,7 +116,7 @@ class PlainLCNN(ClassificationBase):
         self.model.to(self.device)
 
     def forward(self, source: dict, **kwargs) -> dict:
-        source = utils.move_to_cuda(source, self.device)
+        super().forward(source)
         # source: batch, 
         feats = source["feats"]
         #feats = feats.transpose(2, 3)
