@@ -92,8 +92,6 @@ class MegaByteFeat(nn.Module):
     def __init__(self, args: Namespace):
         super().__init__()
         self.patch_size = getattr(args, 'patch_size', 4)
-        self.n_head = getattr(args, 'n_head', 8)
-        self.patch_size = getattr(args, 'patch_size', 4)
         self.n_head = getattr(args, 'n_head', 8) # number of attention heads
         self.dim_l_attn = getattr(args, 'dim_attn', 64)
         self.dim_g_attn = self.dim_l_attn * self.patch_size
@@ -211,9 +209,13 @@ class MegaByteFAD(ClassificationBase):
     # TODO: multi-task, predict the discrete id?
     def __init__(self, args: Namespace):
         super().__init__(args)
-
-        self.feat_bn = nn.BatchNorm2d(num_features=1)
-        self.feat_selu = nn.SELU(inplace=True)
+        self.feat_postprocess = getattr(args, 'feat_postprocess', False)
+        if self.feat_postprocess:
+            self.feat_bn = nn.BatchNorm2d(num_features=1)
+            self.feat_selu = nn.SELU(inplace=True)
+        else:
+            self.feat_bn = None 
+            self.feat_selu = None
         global_depth = getattr(args, 'global_depth', 8)
         local_depth = getattr(args, 'local_depth', 4)
         # update global_depth and local_depth
@@ -268,9 +270,10 @@ class MegaByteFAD(ClassificationBase):
         # post processing the front-end features
         # reference: wav2vecAASIST model
         # n c f t
-        x = F.max_pool2d(x, (3, 3))
-        x = self.feat_bn(x)
-        x = self.feat_selu(x)
+        if self.feat_postprocess:
+            x = F.max_pool2d(x, (3, 3))
+            x = self.feat_bn(x)
+            x = self.feat_selu(x)
 
         x = self.mega_feat(x)
         feats, feats_out = self.predict_forward(x)
