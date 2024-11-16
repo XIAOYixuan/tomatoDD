@@ -130,14 +130,15 @@ class AASIST(ClassificationBase):
 
     def __init__(self, args: Namespace):
         super().__init__(args)
-        from .predefined.wav2vecAASIST import AASIST
-        dim_front_out = getattr(args, 'dim_front_out', None)
-        if dim_front_out is None:
-            raise ValueError("dim_front_out must be specified")
+        from .predefined.AASIST import AASIST
+        #dim_front_out = getattr(args, 'dim_front_out', None)
+        #if dim_front_out is None:
+        #    raise ValueError("dim_front_out must be specified")
+        if self.frontend is not None:
+            raise ValueError("Frontend is not supported for AASIST")
         self.model = AASIST(
             device=self.device,
             num_classes=self.num_classes,
-            dim_front_out=dim_front_out
         )
         self.model.to(self.device)
 
@@ -148,7 +149,7 @@ class AASIST(ClassificationBase):
         # need NTF
         if feats.shape[1] != 1:
             raise ValueError("Input must be single channel")
-        feats = rearrange(feats, 'n 1 f t -> n t f')
+        feats = rearrange(feats, 'n 1 t -> n t')
         feats, feats_out = self.model(feats)
         return {
             "feats": feats,
@@ -190,10 +191,24 @@ class MesoNet(ClassificationBase):
 
 if __name__ == "__main__":
     import numpy as np
+
+    def use_raw_audio(MODEL):
+        n, c, t = 4, 1, 64600
+        x = torch.rand(n, c, t)
+        args = Namespace(cuda=0, num_classes=1)
+        model = MODEL(args)
+        source = {
+            "feats": x
+        }
+        out = model(source)
+        feat, feat_out = out["feats"], out["feats_out"]
+        print(feat.shape)
+        print(feat_out.shape)
+
     def use_acoustic_feat(MODEL): 
-        n, c, f, t = 2, 1, 401, 384
+        n, c, f, t = 2, 1, 128, 401
         x = torch.rand(n, c, f, t)
-        args = Namespace(cuda=0)
+        args = Namespace(cuda=0, dim_front_out=128, num_classes=1)
         model = MODEL(args)
         source = {
             "feats": x
@@ -230,5 +245,7 @@ if __name__ == "__main__":
         print(feat.shape)
         print(feat_out.shape)
 
-    use_xlsr(AASIST)
+    #use_xlsr(AASIST)
+    #use_acoustic_feat(AASIST)
     #use_facodec(AASIST)
+    use_raw_audio(AASIST)
