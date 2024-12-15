@@ -8,10 +8,8 @@ import argparse
 from deprecated import deprecated
 
 import torch
-import torchaudio
 from torch.utils.data import Dataset
 import numpy as np
-import librosa
 
 import pandas as pd
 from pathlib import Path
@@ -19,7 +17,7 @@ from pathlib import Path
 from tomato.utils import logger
 from .segment import AudioSegment
 from .base import AudioDataset
-from .audio_augmentation import AudioAugmentation
+from .audio_augmentation import AudioAugmentationFactory 
 from . import audio_util
 
 class FADTrim(AudioDataset):
@@ -32,8 +30,8 @@ class FADTrim(AudioDataset):
     def __init__(self, args: argparse.Namespace, split: str, train_mode: bool = True):
         super().__init__(args, split, train_mode)
         self.sample_rate = 16_000
-        self.max_len = getattr(args, "max_samples", None)
-        if self.max_len is None:
+        self.max_len = getattr(args, "max_samples", -1)
+        if self.max_len < 0:
             self.max_len = getattr(args, "max_len", 4) * self.sample_rate
         logger.info(f"Max length: {self.max_len}. Note: if the transformation is used, and the features are read from the disk, the max_len will be ignored, because the audios are already trimmed before saved")
         # for visualization
@@ -49,14 +47,17 @@ class FADTrim(AudioDataset):
             self.transformation = self._load_transformation(args)
         else:
             self.transformation = None
-        if train_mode and hasattr(args, "upsample"):
+        do_upsample = getattr(args, "upsample", False)
+        if train_mode and do_upsample: 
             logger.info("Oversampling data")
             self.uttids = self.upsample_data()
         self.uttid2idx = {uttid: idx for idx, uttid in enumerate(self.uttids)}
         
         self.do_augment = train_mode & getattr(args, "do_augment", False)
         if self.do_augment:
-            self.augmentor = AudioAugmentation()
+            aug_type = getattr(args, "augment_type", "default")
+            logger.info(f"Using data augmentation {aug_type}")
+            self.augmentor = AudioAugmentationFactory.create(aug_type)
         self.train_mode = train_mode
     
     def _load_both(self, args):
