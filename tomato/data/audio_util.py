@@ -1,5 +1,6 @@
 # Adpated from: https://github.com/piotrkawa/deepfake-whisper-features
 import torchaudio
+import torch
 import numpy as np
 
 SAMPLING_RATE = 16_000
@@ -29,8 +30,9 @@ def apply_trim(waveform, sample_rate):
     return waveform, sample_rate
 
 
-def get_audio(audio_path, to_mono=True, trim_sil=False, **kwargs):
+def get_audio(audio_path, to_mono=True, trim_sil=False, norm=True, target_rms=-20, **kwargs):
     waveform, sample_rate = torchaudio.load(audio_path, **kwargs)
+    # TORCHAUDIO only converts audio to float32
     if sample_rate != SAMPLING_RATE:
         waveform, sample_rate = resample_wave(waveform, sample_rate, SAMPLING_RATE)
 
@@ -41,6 +43,13 @@ def get_audio(audio_path, to_mono=True, trim_sil=False, **kwargs):
     if trim_sil:
     # trim too long utterances
         waveform, sample_rate = apply_trim(waveform, sample_rate)
+
+    if norm:
+        rms = waveform.pow(2).mean().sqrt()
+        target_rms_linear = 10 ** (target_rms / 20.0)
+        scaling_factor = target_rms_linear / rms
+        waveform = waveform * scaling_factor
+        waveform = torch.clamp(waveform, min=-1.0, max=1.0)
     return waveform, sample_rate
 
 if __name__ == "__main__":
