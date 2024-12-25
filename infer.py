@@ -8,6 +8,7 @@ from datetime import datetime
 import argparse
 import torch
 import torch.nn as nn
+from pathlib import Path
 
 from tomato.utils import utils, logger, main_loader
 
@@ -17,16 +18,20 @@ def parse_args():
     parser = argparse.ArgumentParser(description="training script")
     # need config file
     # short cut "-c"
+    # the simplest way is to set: -c, -tag, -ckpt_tag (use -data to specify the data path)
     parser.add_argument("-c", "--config", type=str, required=True, help="config file")
-    parser.add_argument("-exp", "--exp", type=str, default="infer", help="experiment name")
-    parser.add_argument("-s", "--split", type=str, default="future", help="which split is used for infer")
+    parser.add_argument("-exp", "--exp", type=str, default="infer", help="experiment name, needed to setup the task, can be ignored aka don't need to set it")
+    parser.add_argument("-s", "--split", type=str, default="test", help="which split is used for infer")
     parser.add_argument("-tag", "--tag", type=str, required=True, help="output file name")
     parser.add_argument("-ckpt", "--ckpt_dir", type=str, default=None, help="checkpoint dir, the default is the exp dir")
     parser.add_argument("-ckpt_tag", "--ckpt_tag", type=str, default="best", help="load the best or the last model, default is best")
-    parser.add_argument("-task", "--task", type=str, default="SVDDTask", help="task name")
-    parser.add_argument("-o", "--output", type=str, default="./output/infer", help="output dir")
+    parser.add_argument("-task", "--task", type=str, default="xent", help="task name")
+    parser.add_argument("-o", "--output", type=str, default=None, help="output dir, default will be an infer dir under the parent dir of the config")
     parser.add_argument("-cuda", "--cuda", type=int, default=0, help="cuda device")
+    parser.add_argument("-data", "--data_path", type=str, default="", help="if set to default, use the data_path provided in the config, otherwise, use this path to load the corresponding split")
     parser.add_argument("-debug", "--debug", action="store_true", help="debug mode")
+    parser.add_argument("-bs", "--batch_size", type=int, default=192, help="batch size")
+    parser.add_argument("-nw", "--num_workers", type=int, default=8, help="number of workers") 
 
     return parser.parse_args()
 
@@ -54,8 +59,14 @@ def test_model_parameters(model):
 def main():
     args = parse_args()
     torch.manual_seed(335)
+    config_path = Path(args.config)
+    config_parent = config_path.parent
+    if args.ckpt_dir is None:
+        args.ckpt_dir = str(config_parent)
+    if args.output is None:
+        args.output = str(config_parent / "infer")
     
-    data = main_loader.load_data(args.config, is_infer=True)
+    data = main_loader.load_data(args.config, is_infer=True, data_path=args.data_path, test_bs=args.batch_size, test_num_workers=args.num_workers)
     model = main_loader.load_model(args.config, args.cuda)
     logger.info("Architecture: --------------------------------------------------")
     logger.info(model)
