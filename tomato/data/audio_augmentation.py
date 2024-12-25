@@ -8,18 +8,31 @@ import numpy as np
 from tomato.utils import logger
 from . import audio_util
 
-class AudioAugmentation:
+class AudioAugmentationBase:
 
     def __init__(self):
-        # TODO: move these to config
-        noise_path = Path("/resources/speech/corpora/Noise/musan/noise")
-        self.noises = self._get_all_noise_paths(noise_path)
-        rir_path = Path("/resources/speech/corpora/Noise/RIRS_NOISES")
-        self.rir = self._get_all_noise_paths(rir_path)
+        pass
+        
+    def __call__(self, audio, **kwargs):
+        pass
+
+class DefaultAudioAugmentation(AudioAugmentationBase):
+    
+    def __init__(self):
+        self.load_musan_noise()
+        self.load_rir_noise()
         self.noise_db_low, self.noise_db_high = 5, 20 # TODO: set by config
         self.add_noise_prob = 0.5
         self.convolve_rir_prob = 0.5
         # alway do single channel
+    
+    def load_musan_noise(self):
+        noise_path = Path("/resources/speech/corpora/Noise/musan/noise")
+        self.noises = self._get_all_noise_paths(noise_path)
+    
+    def load_rir_noise(self):
+        rir_path = Path("/resources/speech/corpora/Noise/RIRS_NOISES")
+        self.rir = self._get_all_noise_paths(rir_path)
 
     def pink_call(self, audio):
         noise_prob = np.random.rand()
@@ -27,22 +40,24 @@ class AudioAugmentation:
             audio, noise = self.add_pink_noise(audio)
         return audio
 
-    def __call__(self, audio):
+    def __call__(self, audio, **kwargs):
         self.audio_power = float((audio**2).mean())
         noise_prob = np.random.rand()
         rir_prob = np.random.rand()
         #logger.info(f"noise_prob: {noise_prob}, rir_prob: {rir_prob}")
-        if rir_prob > self.convolve_rir_prob:
+        if rir_prob < self.convolve_rir_prob:
             audio, rir = self.convolve_rir(audio)
-        if noise_prob > self.add_noise_prob:
+        if noise_prob < self.add_noise_prob:
             audio, noise = self.add_noises(audio)
         return audio
 
     def _get_all_noise_paths(self, path):
         noises = []
+        #print(f"loading noises from {path}")
         # recursively search for files that endswith .wav 
         for noise in path.rglob("*.wav"):
             noises.append(noise)
+        #print(f"loaded {len(noises)} noises")
         return noises
     
     def add_noises(self, audio):
@@ -69,7 +84,7 @@ class AudioAugmentation:
         scale = (
             10 ** (-noise_db / 20) 
             * np.sqrt(self.audio_power)
-            / np.sqrt(max(noise_power, 1e-10))
+            / np.sqrt(np.maximum(noise_power, 1e-10))
         )
         audio = audio + scale * noise
         return audio, noise
@@ -101,24 +116,61 @@ class AudioAugmentation:
 
     def add_music(self, audio):
         raise NotImplementedError
+    
+
+class RawBoostAudioAugmentation(DefaultAudioAugmentation):
+
+    def __init__(self):
+        from .RawBoost import process_Rawboost_feature, get_default_args
+        
+        self.load_rir_noise()
+        self.rawboost_args = get_default_args()
+        self.process_Rawboost_feature = process_Rawboost_feature
+        self.rir_prob = float(1/3)
+        self.noise_prob = float(1/5)
+
+    def __call__(self, audio):
+        self.audio_power = float((audio**2).mean())
+        rir_prob = np.random.rand()
+        if rir_prob < self.rir_prob:
+            #print("convolve_rir")
+            audio, rir = self.convolve_rir(audio)
+        noise_prob = np.random.rand()
+        if noise_prob < self.noise_prob:
+            #print("add_noises")
+            np_audio = audio.squeeze(0).numpy()
+            sr = 16_000
+            noisy_audio = self.process_Rawboost_feature(np_audio, sr, self.rawboost_args, self.rawboost_args.algo)
+            audio = torch.from_numpy(noisy_audio).unsqueeze(0).to(torch.float32)
+        #print(type(audio), audio.shape) 
+        return audio
+
+        
+class AudioAugmentationFactory:
+    @staticmethod
+    def create(augment_type='default'):
+        if augment_type == 'default':
+            return DefaultAudioAugmentation()
+        elif augment_type == 'rawboost':
+            return RawBoostAudioAugmentation()
+        else:
+            raise ValueError("Unknown augment_type")
 
 
 if __name__ == "__main__":
     import os
     audio_path = os.environ.get("AUDIO_PATH")
     out_dir = os.environ.get("OUT_DIR")
-    audio, sample_rate = torchaudio.load(audio_path, normalize=True)
-    target_sample_rate = 16_000
-    audio, sample_rate = torchaudio.sox_effects.apply_effects_tensor(
-        audio, sample_rate, [["rate", f"{target_sample_rate}"]]
-    )
+    audio, sample_rate = audio_util.get_audio(audio_path)
     print(f"sample rate: {sample_rate}")
 
-    audio_augmentation = AudioAugmentation()
-    audio, noise = audio_augmentation.add_pink_noise(audio)
-    out_audio_path = Path(out_dir) / "audio.wav"
-    out_noise_path = Path(out_dir) / "noise.wav"
+    augment_type = "rawboost"
+    augmentor = AudioAugmentationFactory.create(augment_type)
+    aug_audio = augmentor(audio)
     
     # save audio
-    torchaudio.save(str(out_audio_path), audio, sample_rate)
-    torchaudio.save(str(out_noise_path), noise, sample_rate)
+    torchaudio.save(f"{out_dir}/augmented.wav", aug_audio, sample_rate)
+    print(f"saved augmented audio to {out_dir}/augmented.wav")
+    # save original audio
+    torchaudio.save(f"{out_dir}/original.wav", audio, sample_rate)
+    print(f"saved original audio to {out_dir}/original.wav")
