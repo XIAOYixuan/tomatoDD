@@ -17,10 +17,13 @@ class MetaDatasetReader:
         self.fake_uttids = None
 
     @classmethod
-    def from_path(cls, path, split):
+    def from_path(cls, path, split=["train", "dev", "test"]):
         obj = cls()
         obj.path = Path(path)
-        obj.read_splits([split])
+        if isinstance(split, str):
+            obj.read_splits([split])
+        else:
+            obj.read_splits(split)
         obj.uttids = list(obj.uttid2info.keys())
         cls.show_statistics(obj)
         return obj
@@ -29,9 +32,9 @@ class MetaDatasetReader:
     def from_utt_info(cls, uttids, utt2info, utt2path):
         obj = cls()
         
-        obj.uttids = uttids
-        obj.uttid2info = utt2info
-        obj.uttid2path = utt2path
+        obj.uttids = deepcopy(uttids)
+        obj.uttid2info = deepcopy(utt2info)
+        obj.uttid2path = deepcopy(utt2path)
 
         for uttid in obj.uttid2info:
             if "st" in obj.uttid2info[uttid] and "dur" in obj.uttid2info[uttid]:
@@ -63,7 +66,6 @@ class MetaDatasetReader:
         split2uttids = {}
         for split, count in split_dict.items():
             if remain_uttids == 0:
-                print(f"Warning: no more uttids for class {class_label} split {split}")
                 continue
             cur_uttids = min(remain_uttids, count[class_label])
             chosen_uttids = np.random.choice(this_uttids, cur_uttids, replace=False)
@@ -150,10 +152,14 @@ class MetaDatasetReader:
         self.uttid2path = {}
         self.uttid2info = {}
         for split in splits:
+            if not (self.path/f"{split}.tsv").exists():
+                print(f"Warning: {split}.tsv not exist, skipping")
+                continue
             utt2path = self._read_tsv(self.path/f"{split}.tsv")
             utt2info = self._read_txt(self.path/f"{split}.txt")
             self.uttid2path.update(utt2path)
             self.uttid2info.update(utt2info)
+            print(f"Read {split} done")
 
     def _split_real_and_fake(self):
         self.real_uttids = []

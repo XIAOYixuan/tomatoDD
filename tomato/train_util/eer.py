@@ -24,7 +24,7 @@ def compute_eer(ground_truth, predictions):
     Expecting ground_truth and predictions to be numpy arrays of the same length;
     Defining deepfakes (ground_truth == 1) as target scores and bonafide (ground_truth == 0) as nontarget scores.
     """
-    assert ground_truth.shape == predictions.shape, "ground_truth and predictions must have the same shape"
+    assert ground_truth.shape == predictions.shape, f"ground_truth and predictions must have the same shape, got {ground_truth.shape} and {predictions.shape}"
     assert len(ground_truth.shape) == 1, "ground_truth and predictions must be 1D arrays"
     
     target_scores = predictions[ground_truth == 1]
