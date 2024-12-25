@@ -20,13 +20,12 @@ def check_key(args, key):
     if not hasattr(args, key):
         raise ValueError(f"Key {key} does not exist in train_args")
 
-def config2arg(config_file: str, entry: str):
+def config2arg(config_file: str, entry: str) -> argparse.Namespace:
     # TODO: mainly use argparse to parse config file?
     with open(config_file, 'r') as f:
         config = yaml.safe_load(f)
     if entry not in config:
-        logger.warning(f"Entry {entry} not found in config file {config_file}")
-        return None
+        raise ValueError(f"Entry {entry} not found in config file {config_file}")
     namespace = argparse.Namespace(**config[entry])
     return namespace
 
@@ -120,10 +119,13 @@ def move_to_cuda(sample, device=None):
     return apply_to_sample(_move_to_cuda, sample)                    
 
 
-def set_seed(seed: int):
+def set_seed(seed = None):
     import os
     import random
     import numpy as np
+    if seed is None:
+        seed = np.random.randint(0, 100000)
+    logger.info("seed is set to {}".format(seed))
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -133,6 +135,7 @@ def set_seed(seed: int):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
     os.environ["PYTHONHASHSEED"] = str(seed)
+    return seed
 
 def softmax(x, dim: int, onnx_trace: bool = False):
     if onnx_trace:

@@ -33,14 +33,22 @@ def load_dict(config_path):
     # TODO: load dict from config, avoid repetitive loading
 
 
-def load_data(config_path: str, is_infer: bool = False):
+def load_data(config_path: str, is_infer: bool = False, data_path: str = "", test_bs=None, test_num_workers=None):
     data_args = utils.config2arg(config_path, "data") # argparse.Namespace
 
     # check if is multds
     class_name = data_args.model_class
     if class_name == "MultiDS":
         return load_multids_data(config_path, is_infer)
-
+    # for infer, the user can set the data_path directly
+    if data_path != "": 
+        data_args.data_path = data_path
+    # for infer
+    if test_bs is not None:
+        data_args.test_batch_size = test_bs
+    if test_num_workers is not None:
+        data_args.test_num_workers = test_num_workers
+    logger.info(f"Loading data from {data_args.data_path}")
     def load_dataset_split(data_args, split, train_mode=True):
         class_name = data_args.model_class
         DatasetClass = get_dataset_class(class_name)
@@ -49,11 +57,13 @@ def load_data(config_path: str, is_infer: bool = False):
                                             train_mode=train_mode)
         from torch.utils.data import DataLoader
         split_dataloader = DataLoader(split_dataset, 
-                                batch_size=data_args.test_batch_size, 
+                                batch_size=data_args.batch_size if train_mode else data_args.test_batch_size,
                                 shuffle=True,
                                 drop_last=False, 
                                 num_workers=data_args.test_num_workers,
                                 collate_fn=DatasetClass.collate_fn)
+        # log the batch size
+        logger.info(f"Batch size for {split} is {split_dataloader.batch_size}")
         return split_dataset, split_dataloader
 
     # TODO: add splits to config
