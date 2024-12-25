@@ -309,13 +309,16 @@ class FADBaseTask(BaseTask):
     attacker attribution task.
     """
 
-    def setup(self, cfg: str, exp: str, data, 
-              model, criterion, is_infer=False) -> None:
-        super().setup(cfg, exp, data, model, criterion, is_infer)
+    def setup(self, cfg, exp, data, model, criterion, is_infer=False, seed=42, server="ckpts"):
+        super().setup(cfg, exp, data, model, criterion, is_infer, seed, server)
 
         utils.check_key(self.train_args, "start_steps")
         utils.check_key(self.train_args, "max_steps")
         utils.check_key(self.train_args, "max_epoch")
+
+        # for early stopping, default is no early stopping
+        self.patience = getattr(self.train_args, "patience", self.train_args.max_epoch)
+        self.min_delta = getattr(self.train_args, "min_delta", 0.0)
         
         # train_args type: argparse.Namespace
         # ensure that the key start_steps in train_args
@@ -489,6 +492,8 @@ class FADBaseTask(BaseTask):
 
         self.train_strategy.set_optimizer_scheduler(self)
         start_epoch, cur_step = self._resume_from_last_checkpoint()
+        no_improve_count  = 0
+        logger.info(f"Start training with early stopping {self.patience} and min_delta {self.min_delta}")
 
         if cur_step > 0:
             best_err = self.validate(cur_step)
@@ -506,7 +511,25 @@ class FADBaseTask(BaseTask):
                 logger.info("Early stop triggered")
                 break
         
-            best_err = self.validate_and_save(best_err, cur_step)
+            new_best_err = self.validate_and_save(best_err, cur_step)
+
+            # special save
+            # check if model has gamma
+            # to be removed, now for debug
+            if hasattr(self.model, "gamma"):
+                gamma = self.model.gamma
+                torch.save(gamma, f"{self.ckpt_dir}/gamma_{epoch_idx}.pt")
+            
+            improvement = best_err - new_best_err
+            if improvement > self.min_delta:
+                best_err = new_best_err
+                no_improve_count = 0
+            else:
+                no_improve_count += 1
+                if no_improve_count > self.patience:
+                    logger.info("Early stop triggered")
+                    break
+
         logger.info("Training finished")
         self.writer.close() 
 
