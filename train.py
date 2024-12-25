@@ -21,9 +21,10 @@ def parse_args():
     parser.add_argument("-c", "--config", type=str, required=True, help="config file")
     parser.add_argument("-exp", "--exp", type=str, default=None, help="experiment name")
     parser.add_argument("-ckpt", "--ckpt", type=str, default=None, help="checkpoint path")
-    parser.add_argument("-task", "--task", type=str, default="SVDDTask", help="task name")
+    parser.add_argument("-task", "--task", type=str, default="xent", help="task name")
     parser.add_argument("-debug", "--debug", action="store_true", help="debug mode")
     parser.add_argument("-cuda", "--cuda", type=int, default=0, help="cuda device")
+    parser.add_argument("-s", "--server", type=str, default="ckpts", help="server name, used to decide the ckpt parent dir")
     args = parser.parse_args()
 
     if args.exp is None:
@@ -56,7 +57,7 @@ def test_model_parameters(model):
     
 def main():
     args = parse_args()
-    utils.set_seed(42)
+    seed = utils.set_seed(11038)
     model = main_loader.load_model(args.config, args.cuda)
     logger.info("Architecture: --------------------------------------------------")
     logger.info(model)
@@ -68,7 +69,7 @@ def main():
     data = main_loader.load_data(args.config)
     import tomato.task
     task = tomato.task.get_task(args.task)
-    task.setup(args.config, args.exp, data, model, loss_fn)
+    task.setup(args.config, args.exp, data, model, loss_fn, seed=seed, server=args.server)
     if args.ckpt is not None:
         task.load_checkpoint("best", args.ckpt)
     task.train()

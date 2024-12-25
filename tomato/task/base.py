@@ -89,7 +89,9 @@ class BaseTask(ABC):
                  data, 
                  model: BaseModel, 
                  criterion: BaseCriterion, 
-                 is_infer = False) -> None:
+                 is_infer = False,
+                 seed: int = 42,
+                 server: str = "ckpts") -> None:
         self.is_infer = is_infer
         # assign variables
         self.train_args =  utils.config2arg(cfg, "train") # type: argparse.Namespace
@@ -107,9 +109,9 @@ class BaseTask(ABC):
         self.criterion = criterion
 
         # prep tensorboard 
-        self.save_dir = f"output/ckpts/{exp}"
-        self.writer = SummaryWriter(f"output/tensorboard/{exp}")
-        self.ckpt_dir = f"output/ckpts/{exp}"
+        self.save_dir = f"output/{server}/{exp}/seed{seed}"
+        self.writer = SummaryWriter(f"output/tensorboard/{exp}_seed{seed}")
+        self.ckpt_dir = f"output/{server}/{exp}/seed{seed}"
         if not os.path.exists(self.ckpt_dir):
             os.makedirs(self.ckpt_dir)
 
