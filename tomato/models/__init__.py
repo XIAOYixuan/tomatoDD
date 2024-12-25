@@ -1,6 +1,8 @@
 from .fad_models import ResNet, WhisperMeso, Wav2Vec2AASIST, PlainLCNN, MesoNet, AASIST
 from .megabyte import MegaByteFAD, LGMegaByte, OCMegaByte, TimeFreqMega, TimeFreqConvHead
 from .conv_timefreq import ConvFreqTime
+from .discriminators import HiFiDisc
+from .frontend_only import XLSRAdapter, XLSRTimeFirst, XLSRAllAttn, XLSRTimeAttnOnly, XLSRTimeAttnWithBottleneck
 def get_model_class(class_name):
     if class_name == "ResNet":
         return ResNet 
@@ -26,5 +28,17 @@ def get_model_class(class_name):
         return TimeFreqConvHead
     elif class_name == "ConvFreqTime":
         return ConvFreqTime
+    elif class_name == "HiFiDisc":
+        return HiFiDisc
+    elif class_name == "XLSRAdapter":
+        return XLSRAdapter
+    elif class_name == "XLSRTimeFirst":
+        return XLSRTimeFirst
+    elif class_name == "XLSRAllAttn":
+        return XLSRAllAttn
+    elif class_name == "XLSRTimeAttnOnly":
+        return XLSRTimeAttnOnly
+    elif class_name == "XLSRTimeAttnWithBottleneck":
+        return XLSRTimeAttnWithBottleneck
     else:
         raise ValueError("Unknown model class: {}".format(class_name))

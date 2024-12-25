@@ -33,6 +33,7 @@ class ClassificationBase(BaseModel):
         self.num_classes = getattr(args, 'num_classes', 2)
         self.frontend = getattr(args, 'frontend', None)
         self.freeze_frontend = getattr(args, 'freeze_frontend', True)
+        self.have_padding_mask = getattr(args, "have_padding_mask", False)
         self.frontend_model = None
 
         if self.frontend is None:
@@ -43,6 +44,10 @@ class ClassificationBase(BaseModel):
             self.frontend_model = frontend_models.HuBERT(self.device, args)
         elif self.frontend == "facodec":
             self.frontend_model = frontend_models.FACodec(self.device, args)
+        elif self.frontend == "whisper":
+            self.frontend_model = frontend_models.Whisper(self.device, args)
+        elif self.frontend == "tfwhisper":
+            self.frontend_model = frontend_models.TFWhisper(self.device, args)
         else:
             raise ValueError(f"Frontend {self.frontend} is not supported")
 
@@ -50,6 +55,7 @@ class ClassificationBase(BaseModel):
             logger.info("Freezing frontend model")
             for param in self.frontend_model.parameters():
                 param.requires_grad = False
+            self.frontend_model.eval()
 
     def forward_frontend(self, source: dict, **kwargs) -> dict:
         for key in source:

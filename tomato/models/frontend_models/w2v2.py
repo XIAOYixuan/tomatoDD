@@ -26,14 +26,12 @@ class FairseqFrontend(BaseFrontEnd):
         model, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([cp_path])
         self.model = model[0]
         self.device = device
-        return
 
     def extract_feat(self, input_data):
         # put the model to GPU if it not there
         if next(self.model.parameters()).device != input_data.device \
            or next(self.model.parameters()).dtype != input_data.dtype:
             self.model.to(input_data.device, dtype=input_data.dtype)
-            self.model.train()
 
         # input_data: NCT
         if input_data.shape[1] != 1:
