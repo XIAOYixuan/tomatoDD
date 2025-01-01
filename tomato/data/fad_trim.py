@@ -34,6 +34,9 @@ class FADTrim(AudioDataset):
         if self.max_len < 0:
             self.max_len = getattr(args, "max_len", 4) * self.sample_rate
         logger.info(f"Max length: {self.max_len}. Note: if the transformation is used, and the features are read from the disk, the max_len will be ignored, because the audios are already trimmed before saved")
+        # if set to True, we use segment_audio to generate fixed length input
+        # other, we zero_pad audio or trim audio to max_len, and create a padding mask
+        self.fix_len = getattr(args, "fix_len", True)
         # for visualization
         self.return_audio = getattr(args, "return_audio", False)
         self.trim_silence = getattr(args, "trim_silence", True)
@@ -134,7 +137,10 @@ class FADTrim(AudioDataset):
                                                   frame_offset=frame_offset, num_frames=num_frames) 
         if audio.shape[1] == 0:
             raise ValueError(f"Audio {audio_path} is empty")
-        audio = self.sample_segment(audio)
+        if self.fix_len:
+            audio = self.sample_segment(audio)
+        else:
+            audio = audio[:, :self.max_len]
         if self.do_augment and self.train_mode:
             audio = self.augmentor(audio)
         
@@ -251,18 +257,42 @@ class FADTrim(AudioDataset):
         origin_ds = [sample["origin_ds"] for sample in batch]
         speakers = [sample["speaker"] for sample in batch]
         attackers = [sample["attacker"] for sample in batch]
+        max_feat_len = max([feat.shape[1] for feat in feats])
+        # if all the features are of the same length, then we don't need to pad
+        all_fix_len = all([feat.shape[1] == max_feat_len for feat in feats])
+        if all_fix_len:
+            batch_feats = torch.stack(feats)
+        else:
+            batch_feats = torch.zeros(len(feats), feats[0].shape[0], max_feat_len) # N, C, T
+            for idx, feat in enumerate(feats):
+                batch_feats[idx, :, :feat.shape[1]] = feat
+        
+            # padding_mask, bool
+            batch_padding_mask = torch.zeros_like(batch_feats, dtype=torch.bool)
+            for i, feat in enumerate(feats):
+                batch_padding_mask[i, :, feat.shape[1]:] = True
 
-        batch_feats = torch.stack(feats)
         batch_labels = torch.LongTensor(labels)
         #logger.info(f"Batch feats shape: {batch_feats.shape}")
         #logger.info(f"Batch labels shape: {batch_labels.shape}")
-        return {
-            "uttids": uttids,
-            "feats": batch_feats,
-            "labels": batch_labels,
-            "origin_ds": origin_ds,
-            "speakers": speakers,
-            "attackers": attackers
+        if all_fix_len:
+            return {
+                "uttids": uttids,
+                "feats": batch_feats,
+                "labels": batch_labels,
+                "origin_ds": origin_ds,
+                "speakers": speakers,
+                "attackers": attackers,
+            } 
+        else:
+            return {
+                "uttids": uttids,
+                "feats": batch_feats,
+                "labels": batch_labels,
+                "origin_ds": origin_ds,
+                "speakers": speakers,
+                "attackers": attackers,
+                "padding_mask": batch_padding_mask
         } 
 
 
@@ -740,8 +770,27 @@ class GPTSoVITS(FADTrim):
         return FADTrim.collate_fn(batch)
 
 if __name__ == "__main__":
-    from tomato.utils import config2arg
-    config_path = os.environ["CONFIG"]
-    data_args = config2arg(config_path, "data")
+    # get data_path from os env
+    data_path = os.getenv("DATA_PATH")
+    if data_path is None:
+        raise ValueError("DATA_PATH is not set")
+    args = argparse.Namespace(
+        max_samples=8*16000,
+        fix_len=False,
+        trim_silence=True,
+        do_augment=True,
+        augment_type="rawboost",
+        data_path=data_path
+    )
 
-    fast_dataset = FastGeneralFad(data_args, "test", train_mode=False)
+    ds = GeneralFAD(args, split='dev', train_mode=True)
+
+    #one_item = ds._getitem_impl(3)
+    #print(one_item)
+    #print(one_item["feats"].shape)
+
+    batch = [ds._getitem_impl(i) for i in range(4)]
+    collated = GeneralFAD.collate_fn(batch)
+    print(collated["feats"].shape)
+    print(collated["padding_mask"].shape)
+    print(collated["padding_mask"][0])
