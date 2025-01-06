@@ -4,6 +4,8 @@
 #
 from .fad_trim import SVDD, MLAADMono, ASVspoof19, GPTSoVITS, GeneralFAD, FastGeneralFAD
 from .mutli_datasets import MultiDS
+from .tf_dataset import TFGeneralFAD
+
 def get_dataset_class(class_name):
     if class_name == "SVDD":
         return SVDD
@@ -19,5 +21,7 @@ def get_dataset_class(class_name):
         return GeneralFAD
     elif class_name == "FastGeneralFAD":
         return FastGeneralFAD 
+    elif class_name == "TFGeneralFAD":
+        return TFGeneralFAD
     else:
         raise ValueError(f"Dataset class {class_name} not found")

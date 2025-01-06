@@ -57,7 +57,7 @@ def test_model_parameters(model):
     
 def main():
     args = parse_args()
-    seed = utils.set_seed(11038)
+    seed = utils.set_seed()
     model = main_loader.load_model(args.config, args.cuda)
     logger.info("Architecture: --------------------------------------------------")
     logger.info(model)
