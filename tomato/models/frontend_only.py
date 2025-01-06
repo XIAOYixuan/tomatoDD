@@ -8,7 +8,6 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import fairseq
 from einops import rearrange
 
 from tomato.utils import utils, logger
@@ -64,6 +63,15 @@ class XLSRAdapterBase(ClassificationBase):
                 hiddens = self.frontend_model.extract_feat(feats, return_layer_outs=True, layer_id=self.layer_id)
                 if self.have_padding_mask:
                     raise ValueError("Padding mask is not supported for whisper frontend")
+            elif self.frontend == "tf_w2v2":
+                hiddens, padding_mask = self.frontend_model(input_values=feats, 
+                                                            attention_mask=source['padding_mask'],
+                                                            output_hidden_states=True)
+                # turn hiddens tuple to list
+                hiddens = list(hiddens)
+                # change shape from N,T,D to T,N,D
+                for i in range(len(hiddens)):
+                    hiddens[i] = hiddens[i].transpose(0, 1)
 
         if self.have_padding_mask:
             # padding mask shape: [B, T]
@@ -318,7 +326,7 @@ class XLSRTimeAttnOnly(XLSRAdapterBase):
         time_score = torch.logsumexp(time_attn, dim=-1) # L, N*T
         time_score = rearrange(time_score, 'l (n t) -> l n t', n=N, t=T)
         if self.have_padding_mask:
-            time_score = time_score.masked_fill(padding_mask.unsqueeze(0), float('-inf'))
+            time_score = time_score.masked_fill(~padding_mask.unsqueeze(0), float('-inf'))
         time_score = F.softmax(time_score, dim=-1) # L, N, T
         stacked_h = stacked_h.view(L, N, T, D)
         weighted_h = stacked_h * time_score.unsqueeze(-1) # L, N, T, D
@@ -371,32 +379,37 @@ if __name__ == "__main__":
     #n, c, l = 3, 1, 64000
     #x = torch.randn(n, c, l)
 
-    x_lengths = [1240, 533, 128000]
-    max_l = max(x_lengths)
+    import random
+    bz = 3
     x_features = []
-    for l in x_lengths:
+    x_lengths = []
+    for i in range(bz):
+        l = random.randint(32000, 64000)
         x = torch.randn(l)
         x_features.append(x)
-    
-    x_batch = torch.zeros(len(x_features), max_l)
+        x_lengths.append(l)
+    x_batch = torch.zeros(len(x_features), max(x_lengths))
     for i, x in enumerate(x_features):
         x_batch[i, :len(x)] = x
-    
-    x_mask = torch.zeros_like(x_batch)
-    #print(x_batch)
+
+    # bool padding mask
+    x_mask = torch.zeros(len(x_features), max(x_lengths))
     for i, l in enumerate(x_lengths):
-        x_mask[i, l:] = 1
-    
+        x_mask[i, :l] = 1
+    # turn x_mask to bool
+    x_mask = x_mask.bool()
+    print(x_mask)
     frontend_path = os.environ.get('FRONTEND_PATH')
     if frontend_path is None:
-        raise ValueError("FRONTEND_PATH environment variable must be set")
+        logger.info("FRONTEND_PATH environment variable is not set, using default frontend")
     
     args = argparse.Namespace(
         cuda=0,
         num_classes=1,
-        frontend='XLSR',
+        #frontend='XLSR',
         #frontend='whisper',
-        frontend_path=frontend_path,
+        frontend='tf_w2v2',
+        tf_mdl = "facebook/wav2vec2-xls-r-300m",
         reduce_dim=True,
         bottleneck_dim=256,
         have_padding_mask=True,
@@ -405,10 +418,10 @@ if __name__ == "__main__":
     #model = XLSRAllAttn(args)
     model = XLSRTimeAttnOnly(args)
     #out = model({"feats": x})
-    print(x_batch.unsqueeze(1).shape)
+    #print(x_batch.unsqueeze(1).shape)
     out = model(
         {
-            "feats": x_batch.unsqueeze(1),
+            "feats": x_batch,
             "padding_mask": x_mask,
          })
     

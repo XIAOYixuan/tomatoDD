@@ -7,7 +7,6 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
-import fairseq
 from einops import rearrange
 
 from tomato.utils import logger
@@ -16,6 +15,7 @@ from .base import BaseFrontEnd
 class FairseqFrontend(BaseFrontEnd):
 
     def __init__(self, device, args=None):
+        import fairseq
         super(FairseqFrontend, self).__init__(device)
         # TODO: set the path in the config
         frontend_path = getattr(args, 'frontend_path', None)
@@ -54,7 +54,6 @@ class HuBERT(FairseqFrontend):
         self.model_tag = "HUBERT"
         super(HuBERT, self).__init__(device, args)
         self.out_dim = 1024
-
 
 if __name__ == "__main__":
     device = "cpu"

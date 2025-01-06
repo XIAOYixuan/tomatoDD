@@ -46,8 +46,8 @@ class ClassificationBase(BaseModel):
             self.frontend_model = frontend_models.FACodec(self.device, args)
         elif self.frontend == "whisper":
             self.frontend_model = frontend_models.Whisper(self.device, args)
-        elif self.frontend == "tfwhisper":
-            self.frontend_model = frontend_models.TFWhisper(self.device, args)
+        elif self.frontend == "tf_w2v2":
+            self.frontend_model = frontend_models.TFW2V2(self.device, args)
         else:
             raise ValueError(f"Frontend {self.frontend} is not supported")
 
