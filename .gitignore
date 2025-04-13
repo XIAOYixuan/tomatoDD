@@ -181,3 +181,6 @@ dataset_meta
 asset/*.pkl
 bak
 explore/
+tmp/
+asset/
+local/
