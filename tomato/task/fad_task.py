@@ -272,6 +272,7 @@ class OCSoftmaxTraining(FADTraining):
     
     def forward_one_batch(self, task: BaseTask, batch):
         out_dict = task.model(batch)
+        out_dict['epoch_id'] = task.epoch_id
         loss, output_score, cur_logging_output = task.criterion(batch, out_dict)
         #TODO: make output_score the last return value
         return loss, output_score, cur_logging_output
@@ -486,7 +487,12 @@ class FADBaseTask(BaseTask):
 
 
     def train(self):
-        # Start profiling here
+        lock_file = Path(self.save_dir) / "train.lock"
+        if lock_file.exists():
+            raise ValueError(f"Training {self.exp} is already running, please wait for it to finish")
+        with open(lock_file, "w") as f:
+            f.write("Training is running")
+        
         self.model.train()
         self.criterion.train()
 
@@ -499,8 +505,10 @@ class FADBaseTask(BaseTask):
             best_err = self.validate(cur_step)
         else:
             best_err = float("inf")
+
         for epoch_idx in range(start_epoch, self.train_args.max_epoch):
             logger.info(f"Epoch {epoch_idx}:")
+            self.epoch_id = epoch_idx
             cur_step, should_stop, best_err = self.train_one_epoch(best_err, cur_step)
             # TODO: should we start to step scheduler before traiing, otherwise the initial lr is not update to date
             self.train_strategy.step_scheduler(self, epoch_idx)
@@ -531,6 +539,8 @@ class FADBaseTask(BaseTask):
                     break
 
         logger.info("Training finished")
+        # delete the lock file
+        lock_file.unlink()
         self.writer.close() 
 
 
@@ -558,6 +568,12 @@ class FADBaseTask(BaseTask):
         os.makedirs(output_dir, exist_ok=True)
         os.makedirs(cfg_dir, exist_ok=True)
         self._save_config(cfg_dir / f"{args.tag}.yaml")
+        # write a lock file to indicate the infer is running
+        lock_file = Path(output_dir, f"infer_{args.tag}.lock")
+        if lock_file.exists():
+            raise ValueError(f"Infer {args.tag} is already running, please wait for it to finish")
+        with open(lock_file, "w") as f:
+            f.write("Infer is running")
 
         self.model.eval()
         self.criterion.eval()
@@ -598,6 +614,8 @@ class FADBaseTask(BaseTask):
         import pandas as pd
         datadf = pd.DataFrame(alldata, columns=["uttid", "prediction", "label"])
         datadf.to_csv(csv_path, index=False)
+        # delete the lock file
+        lock_file.unlink()
         return output_dict
     
     

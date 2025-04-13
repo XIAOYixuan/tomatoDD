@@ -83,6 +83,7 @@ class BaseTask(ABC):
 
     def __init__(self, train_strategy: BaseTrainingStrategy):
         self.train_strategy = train_strategy
+        self.epoch_id = None
 
     def setup(self, cfg: str, 
                  exp: str, 

@@ -10,7 +10,7 @@ import argparse
 import torch
 import torch.nn as nn
 
-from tomato.utils import utils, logger, main_loader
+from tomato.utils import utils, logger, main_loader, set_logger_output
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -58,6 +58,11 @@ def test_model_parameters(model):
 def main():
     args = parse_args()
     seed = utils.set_seed()
+
+    # the following code redirects the logger output to the save_dir's train.log
+    log_dir = f"output/{args.server}/{args.exp}/seed{seed}"
+    set_logger_output(log_dir)
+    
     model = main_loader.load_model(args.config, args.cuda)
     logger.info("Architecture: --------------------------------------------------")
     logger.info(model)
