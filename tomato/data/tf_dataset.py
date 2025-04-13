@@ -11,7 +11,6 @@ from argparse import Namespace
 import os
 from pathlib import Path
 import torch
-from transformers import AutoFeatureExtractor
 
 from tomato.utils import logger
 from .fad_trim import FADTrim, GeneralFAD
@@ -22,6 +21,7 @@ class TFGeneralFAD(GeneralFAD):
     This dataset always load full audio, and use transformer to pad the audios
     """
     def __init__(self, args: Namespace, split: str, train_mode: bool = True):
+        from transformers import AutoFeatureExtractor
         super().__init__(args, split, train_mode)
         self.tf_mdl = args.tf_mdl
         self.feat_extractor = AutoFeatureExtractor.from_pretrained(self.tf_mdl)
