@@ -568,20 +568,19 @@ from deprecated import deprecated
 class Wav2Vec2Model(AASIST):
 
     def __init__(self, device, num_classes):
-        self.ssl_model = XLSR(self.device)
-        super().__init__(device, num_classes, self.ssl_model.out_dim)
+        ssl_model = XLSR(device)
+        super().__init__(device, num_classes, ssl_model.out_dim)
+        self.ssl_model = ssl_model
 
     def forward(self, x):
         x_ssl_feat = self.ssl_model.extract_feat(x.squeeze(-1))
+        print('x_ssl_feat', x_ssl_feat.shape)
         return super().forward(x_ssl_feat)
 
 if __name__ == "__main__":
     import numpy as np
-
-    bz = 3
-    wav_length = 64_000
-    x = np.random.rand(bz, wav_length).astype(np.float32)
-    x = torch.from_numpy(x)
+    n, c, t = 4, 1, 64000
+    x = torch.randn(n, c, t)
     # to cuda
     device = "cpu"
 
