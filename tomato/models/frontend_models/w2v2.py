@@ -27,7 +27,7 @@ class FairseqFrontend(BaseFrontEnd):
         self.model = model[0]
         self.device = device
 
-    def extract_feat(self, input_data):
+    def extract_feat(self, input_data, return_layer_outs=False, layer_id=None):
         # put the model to GPU if it not there
         if next(self.model.parameters()).device != input_data.device \
            or next(self.model.parameters()).dtype != input_data.dtype:
@@ -37,9 +37,25 @@ class FairseqFrontend(BaseFrontEnd):
         if input_data.shape[1] != 1:
             raise ValueError(f"{self.model_tag} frontend only support single channel input, got {input_data.shape[1]} channels")
         input_data = input_data.squeeze(1)
-        emb = self.model(input_data, mask=False, features_only=True)['x']
-        emb = rearrange(emb, 'n t f -> n 1 f t') 
-        return emb
+        output = self.model(input_data, mask=False, features_only=True)
+        if return_layer_outs:
+            post_feats = output['post_features'] # [n, t, d]
+            if layer_id is None:
+                hiddens = output['layer_results']
+            else:
+                hiddens = []
+                for i in range(len(output['layer_results'])):
+                    if i + 1 > layer_id:
+                        break
+                    cur_layer = output['layer_results'][i][0] # [t, n, d]
+                    cur_layer = rearrange(cur_layer, 't n d -> n t d')
+                    hiddens.append(cur_layer)
+            layer_outs = [post_feats] + hiddens
+            return layer_outs
+        else:
+            emb = output['x']
+            emb = rearrange(emb, 'n t f -> n 1 f t') 
+            return emb
     
 class XLSR(FairseqFrontend):
     def __init__(self, device, args=None):
