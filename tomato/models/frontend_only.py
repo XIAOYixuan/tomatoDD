@@ -4,7 +4,7 @@
 #
 import os
 import argparse
-
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +24,12 @@ class XLSRAdapterBase(ClassificationBase):
         self.low_dim = 256
         self.attn_num_heads = 4
         self.attn_hiddim = 256
+        self.feat_order = 'tnd'
+        if hasattr(args, "tf_mdl"):
+            self.feat_order = 'ntd'
+        logger.info(f"Feature order: {self.feat_order}")
+        self.output_qtoken = getattr(args, 'output_qtoken', False)
+        self.output_qtoken_dir = getattr(args, 'output_qtoken_dir', None)
         # forward till the specified layer (included) 
         # e.g., if the layer_id is 2, then layer 0, 1, 2 will be included
         self.layer_id = getattr(args, "layer_id", None) 
@@ -69,16 +75,19 @@ class XLSRAdapterBase(ClassificationBase):
                                                             output_hidden_states=True)
                 # turn hiddens tuple to list
                 hiddens = list(hiddens)
-                # change shape from N,T,D to T,N,D
-                for i in range(len(hiddens)):
-                    hiddens[i] = hiddens[i].transpose(0, 1)
+                # logger info
+                # logger.info(f"hiddens shape: {hiddens[0].shape}")
+                #logger.info(f"padding_mask shape: {padding_mask.shape}")
 
         if self.have_padding_mask:
             # padding mask shape: [B, T]
             # hiddens[0] shape: [T, B, 1024]
             if padding_mask is None:
                 raise ValueError("Padding mask is None")
-            if padding_mask.shape[:2] != hiddens[0].shape[:2][::-1]:
+            if self.frontend == 'tf_w2v2':
+                if padding_mask.shape != hiddens[0].shape[:2]:
+                    raise ValueError(f"Padding mask shape {padding_mask.shape} does not match hiddens shape {hiddens[0].shape[:2]}")
+            elif padding_mask.shape[:2] != hiddens[0].shape[:2][::-1]:
                 raise ValueError(f"Padding mask shape {padding_mask.shape[:2]} does not match hiddens shape {hiddens[0].shape[:2][::-1]}")
             return hiddens, padding_mask
         else:
@@ -95,6 +104,15 @@ class XLSRAdapter(XLSRAdapterBase):
         self.attn_ln1 = nn.Linear(self.low_dim, self.attn_hiddim)
         self.attn_relu = nn.ReLU()
         self.attn_ln2 = nn.Linear(self.attn_hiddim, self.attn_num_heads)
+        self.gamma_ckpt = getattr(args, "gamma_ckpt", None)
+        if self.gamma_ckpt is not None:
+            # gamma_ckpt is a pt file
+            gamma_weight = torch.load(self.gamma_ckpt)
+            # init gamma with gamma_weight
+            self.gamma.data = gamma_weight
+            # freeze gamma
+            self.gamma.requires_grad = False
+            logger.info(f"Loaded gamma from {self.gamma_ckpt}")
         self.to(self.device)
 
     def forward(self, source: dict, **kwards) -> dict:
@@ -264,6 +282,13 @@ class XLSRTimeAttnOnly(XLSRAdapterBase):
         self.reduce_dim = getattr(args, "reduce_dim", False)
         attn_input_dim = self.frontend_dim
         self.have_padding_mask = getattr(args, "have_padding_mask", False)
+        self.output_attn = getattr(args, "output_attn", False)
+        self.output_attn_dir = getattr(args, "output_attn_dir", None)
+        self.output_audio = getattr(args, "output_audio", False)
+        self.output_audio_dir = getattr(args, "output_audio_dir", None)
+        self.attn_cache = None
+        if self.have_padding_mask:
+            logger.info("Using padding mask")
         if self.reduce_dim: 
             logger.info("Using bottleneck to reduce time dimension")
             self.bottleneck_dim = args.bottleneck_dim
@@ -289,17 +314,7 @@ class XLSRTimeAttnOnly(XLSRAdapterBase):
         self.attn_cfg = attn_cfg
         self.to(self.device)
 
-    def forward(self, source, **kwargs):
-        #print(f'feats shape: {source["feats"].shape}')
-        if self.have_padding_mask:
-            hiddens, padding_mask = self.extract_features(source)
-            # after extract_feat func, padding_mask True is the voiced frames
-            #valid_steps = (~padding_mask).sum(dim=-1)
-            #if (valid_steps == 0).any():
-            #    raise ValueError("All steps are masked")
-        else:
-            hiddens = self.extract_features(source)
-
+    def tnd_forward(self, hiddens, padding_mask):
         T, N, D = hiddens[0].shape
         L = self.num_layers
         stacked_h = torch.stack(hiddens, dim=0) # L, T, N, D
@@ -325,6 +340,8 @@ class XLSRTimeAttnOnly(XLSRAdapterBase):
         
         time_score = torch.logsumexp(time_attn, dim=-1) # L, N*T
         time_score = rearrange(time_score, 'l (n t) -> l n t', n=N, t=T)
+        if self.output_attn:
+            self.attn_cache = time_score.detach().cpu()
         if self.have_padding_mask:
             time_score = time_score.masked_fill(~padding_mask.unsqueeze(0), float('-inf'))
         time_score = F.softmax(time_score, dim=-1) # L, N, T
@@ -332,6 +349,125 @@ class XLSRTimeAttnOnly(XLSRAdapterBase):
         weighted_h = stacked_h * time_score.unsqueeze(-1) # L, N, T, D
         utt_h = torch.sum(weighted_h, dim=2) # L, N, D
         utt_h = rearrange(utt_h, 'l n d -> n l d') # N, L, D
+        return utt_h
+    
+    def ntd_forward(self, hiddens, padding_mask):
+        N, T, D = hiddens[0].shape
+        L = self.num_layers
+
+        stacked_h = torch.stack(hiddens, dim=0) # L, N, T, D
+        # logger.info(f"stacked_h shape after torch.stack: {stacked_h.shape}")
+        stacked_h = rearrange(stacked_h, 'l n t d -> l (n t) d')
+        # logger.info(f"stacked_h shape after rearrange: {stacked_h.shape}")
+        
+        if self.reduce_dim:
+            stacked_h = torch.bmm(stacked_h, self.time_proj) # L, N*T, D
+            # logger.info(f"stacked_h shape after torch.bmm with time_proj: {stacked_h.shape}")
+            stacked_h = self.time_ln(stacked_h)
+            # logger.info(f"stacked_h shape after time_ln: {stacked_h.shape}")
+            D = self.bottleneck_dim
+
+        if self.attn_cfg == "default":
+            layer_attn = torch.bmm(stacked_h, self.time_attn_mlp1) # L, N*T, A
+            # logger.info(f"layer_attn shape after torch.bmm with time_attn_mlp1: {layer_attn.shape}")
+        elif self.attn_cfg == "LN-ASP":
+            raise ValueError("This setting is bad, should be banned")
+        
+        time_score = torch.logsumexp(layer_attn, dim=-1) # L, N*T
+        # logger.info(f"time_score shape after torch.logsumexp: {time_score.shape}")
+        time_score = rearrange(time_score, 'l (n t) -> l n t', n=N, t=T)
+        # logger.info(f"time_score shape after rearrange: {time_score.shape}")
+        
+        if self.have_padding_mask:
+            time_score = time_score.masked_fill(~padding_mask.unsqueeze(0), float('-inf'))
+            # logger.info(f"time_score shape after masked_fill: {time_score.shape}")
+        
+        time_score = F.softmax(time_score, dim=-1) # L, N, T
+        # logger.info(f"time_score shape after F.softmax: {time_score.shape}")
+        
+        stacked_h = stacked_h.view(L, N, T, D)
+        # logger.info(f"stacked_h shape after view: {stacked_h.shape}")
+        
+        weighted_h = stacked_h * time_score.unsqueeze(-1) # L, N, T, D
+        # logger.info(f"weighted_h shape after element-wise multiplication: {weighted_h.shape}")
+        
+        utt_h = torch.sum(weighted_h, dim=2) # L, N, D
+        # logger.info(f"utt_h shape after torch.sum: {utt_h.shape}")
+        
+        utt_h = rearrange(utt_h, 'l n d -> n l d') # N, L, D
+        # logger.info(f"utt_h shape after final rearrange: {utt_h.shape}")
+        
+        return utt_h
+
+    def forward(self, source, **kwargs):
+        if self.output_audio:
+            feats = source['feats']
+            uttids = source['uttids']
+            audio_dir = Path(self.output_audio_dir) 
+            audio_dir.mkdir(exist_ok=True)
+            batch_data = {
+                'uttids': uttids,
+                'audio': feats,
+            }
+            torch.save(batch_data, audio_dir / f"batch_{hash(''.join(uttids))}.pt", _use_new_zipfile_serialization=True)
+            N, L, D = feats.shape[0], self.num_layers, 1024 
+            fake_utt_h = torch.zeros(N, L, D)
+            # to cuda
+            fake_utt_h = fake_utt_h.to(self.device)
+            return {
+                "feats": fake_utt_h,
+            }
+
+        if self.output_qtoken:
+            feats = source['feats']
+            uttids = source['uttids']
+            qtoken_dir = Path(self.output_qtoken_dir)
+            qtoken_dir.mkdir(exist_ok=True)
+            # move feats to cuda
+            feats = feats.to(self.device)
+            qtoken_cache = self.frontend_model.model.quantize(feats.squeeze(1))
+            qtoken_cache = qtoken_cache[1].detach().cpu()
+            if qtoken_cache is None:
+                raise ValueError("qtoken_cache is None")
+            batch_data = {
+                'uttids': uttids,
+                'qtoken': qtoken_cache,
+            }
+            torch.save(batch_data, qtoken_dir / f"batch_{hash(''.join(uttids))}.pt", _use_new_zipfile_serialization=True)
+            # shape: N, L, D
+            N, L, D = feats.shape[0], self.num_layers, 1024 
+            fake_utt_h = torch.zeros(N, L, D)
+            # to cuda
+            fake_utt_h = fake_utt_h.to(self.device)
+            return {
+                "feats": fake_utt_h,
+            }
+        
+        #print(f'feats shape: {source["feats"].shape}')
+        if self.have_padding_mask:
+            hiddens, padding_mask = self.extract_features(source)
+            # after extract_feat func, padding_mask True is the voiced frames
+            #valid_steps = (~padding_mask).sum(dim=-1)
+            #if (valid_steps == 0).any():
+            #    raise ValueError("All steps are masked")
+        else:
+            hiddens = self.extract_features(source)
+            padding_mask = None
+
+        if self.feat_order == 'tnd':
+            utt_h = self.tnd_forward(hiddens, padding_mask)
+        else:
+            utt_h = self.ntd_forward(hiddens, padding_mask)
+
+        if self.output_attn:
+            uttids = source['uttids']
+            attn_dir = Path(self.output_attn_dir)
+            attn_dir.mkdir(exist_ok=True)
+            batch_data = {
+                'uttids': uttids,
+                'attn': self.attn_cache,
+            }
+            torch.save(batch_data, attn_dir / f"batch_{hash(''.join(uttids))}.pt", _use_new_zipfile_serialization=True)
 
         return {
             "feats": utt_h,
