@@ -207,9 +207,12 @@ class FADTrim(AudioDataset):
             try:
                 return self._getitem_impl(idx)
             except Exception as e:
-                logger.error(f"Error in loading idx {idx}: {e}")
+                # write to local file
+                path = self.uttid2path[self.uttids[idx]]
+                logger.error(f"Error in loading idx {idx}, path: {path}, error: {e}")
+                #with open("error.txt", "a") as f:
+                #    f.write(f"Split: {self.split}, Error in loading idx {idx}, path: {path}\n")
                 idx = np.random.randint(len(self.uttids))
-                logger.info(f"Randomly choose idx {idx}")
 
     def upsample_data(self):
         real_utts = []
@@ -283,6 +286,7 @@ class FADTrim(AudioDataset):
                 "origin_ds": origin_ds,
                 "speakers": speakers,
                 "attackers": attackers,
+                "padding_mask": None
             } 
         else:
             return {
