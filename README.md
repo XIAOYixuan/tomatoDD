@@ -2,11 +2,35 @@
 
 This is the official repository for our research work on fake audio detection at the IMS.
 
-Code and model ckpt for ICASSP24 submission is on the way ...
+This branch (sfm-fad) is for the Interspeech25 submission.
 
 ## fairseq installation
 
 The codebase depends on models provided by [fairseq](https://github.com/facebookresearch/fairseq) with the commit `920a548ca770fb1a951f7f4289b4d3a0c1bc226f`. Please follow fairseq's `README.md` to install it.
+
+## train
+
+The `train.py` script accepts the following parameters for training tasks:
+
+```bash
+python train.py     
+    -c [config file path]   
+    -exp [experiment tag]     
+    -task [task]     
+    -s [save directory]  
+    -ckpt [optional: checkpoint directory path]     
+```
+
+- **`-c [config file path]`**: 
+  Specify the config file path for the training.
+- **`-exp [save directory]`**: 
+  Specify the exp's name for the training results. All training results will be saved under `./output/[s]/[exp]`.
+- **`-task [task]`**:  
+  Specify which task class should be used for the training. 'oc' for one-class learning, 'xent' for cross-entropy loss.
+- **`-s [save directory]`**: 
+  Specify the save directory for the training results. Is useful when you want to run the same experiments on different servers, and want to see if hardware has any impact on the results.
+- **`-ckpt [checkpoint directory path]`**: 
+  Specify the checkpoint directory path for the training. Used for resuming training from a checkpoint.
 
 ## infer
 
@@ -25,7 +49,7 @@ python infer.py
 
 
 - **`-task [task]`**:  
-  Specify which task class should be used for the inference. (Since the project is still under developement, please use 'xent' only)
+  Specify which task class should be used for the inference. 
 
 - **`-c [config file path]`**:  
   The path to the config file.
