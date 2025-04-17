@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-import fairseq
 from tomato.models.frontend_models import XLSR
 
 ___author__ = "Hemlata Tak"

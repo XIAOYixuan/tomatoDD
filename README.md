@@ -4,21 +4,33 @@ This is the official repository for our research work on fake audio detection at
 
 This branch (sfm-fad) is for the Interspeech25 submission.
 
-## fairseq installation
+## fairseq model download
 
-NOTE: we use a modified version of fairseq, [link](https://github.com/XIAOYixuan/fairseq_ADD) 
+There two ways to get the pretrained model.
 
-After installing the requirements, you need to install the modified fairseq.
-Please follow the instructions in the README.md of the modified fairseq to install it.
-In short, it'll be:
+### Download from fairseq's website.
+After downloading the pretrained model, please use the tool to convert the format that we use.
+
+Pretrained models: XLS-R 300M
+Download it on fairseq's [website](https://github.com/facebookresearch/fairseq/blob/main/examples/wav2vec/xlsr/README.md).
+
+Then, use the tool to convert the format that we use.
+Notice that you need to install [fairseq](https://github.com/facebookresearch/fairseq) to load the pretrained model. To avoid any potential issues, it's better to install our [modified fairseq](https://github.com/XIAOYixuan/fairseq_ADD).
 
 ```
-cd fairseq_ADD
-pip install -editable ./
-```
+% install fairseq
+cd [fairseq path]
+pip install --editable ./  
 
-Pretrained models:
-Please download XLS-R 300M on fairseq's [website](https://github.com/facebookresearch/fairseq/blob/main/examples/wav2vec/xlsr/README.md) and update the `frontend_path` in the config file.
+% convert the pretrained model
+cd [this repo path]
+python tools/fairseq_model_converter.py [path to the pretrained model] [output directory]
+```
+The new model pt would be saved in the output directory as ```[output directory]/model.pt```
+
+### Download our converted model on HuggingFace.
+
+You can find it at [link](https://huggingface.co/Yixuan/fairseq_models/tree/main)
 
 ## train
 
