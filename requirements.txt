@@ -8,3 +8,5 @@ tensorboard==2.13.0
 torch==2.0.1
 torchaudio==2.0.2
 tqdm==4.65.0
+einops==0.8.1
+huggingface_hub==0.30.2

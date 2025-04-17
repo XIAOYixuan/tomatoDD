@@ -6,7 +6,19 @@ This branch (sfm-fad) is for the Interspeech25 submission.
 
 ## fairseq installation
 
-The codebase depends on models provided by [fairseq](https://github.com/facebookresearch/fairseq) with the commit `920a548ca770fb1a951f7f4289b4d3a0c1bc226f`. Please follow fairseq's `README.md` to install it.
+NOTE: we use a modified version of fairseq, [link](https://github.com/XIAOYixuan/fairseq_ADD) 
+
+After installing the requirements, you need to install the modified fairseq.
+Please follow the instructions in the README.md of the modified fairseq to install it.
+In short, it'll be:
+
+```
+cd fairseq_ADD
+pip install -editable ./
+```
+
+Pretrained models:
+Please download XLS-R 300M on fairseq's [website](https://github.com/facebookresearch/fairseq/blob/main/examples/wav2vec/xlsr/README.md) and update the `frontend_path` in the config file.
 
 ## train
 
