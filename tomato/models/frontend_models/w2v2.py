@@ -15,7 +15,6 @@ from .base import BaseFrontEnd
 class FairseqFrontend(BaseFrontEnd):
 
     def __init__(self, device, args=None):
-        import fairseq
         super(FairseqFrontend, self).__init__(device)
         # TODO: set the path in the config
         frontend_path = getattr(args, 'frontend_path', None)
@@ -23,8 +22,16 @@ class FairseqFrontend(BaseFrontEnd):
             cp_path = os.environ.get(f"{self.model_tag}_CP_PATH") 
         else:
             cp_path = frontend_path
-        model, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([cp_path])
-        self.model = model[0]
+        res = torch.load(cp_path)
+        cfg = res['cfg']
+        state_dict = res['state_dict']
+        if cfg._name == 'wav2vec2':
+            from .fairseq_models.wav2vec2 import Wav2Vec2Model
+            self.model = Wav2Vec2Model(cfg)
+            logger.info(f"Loading {self.model_tag} from {cp_path}")
+            self.model.load_state_dict(state_dict)
+        else:
+            raise ValueError(f"Unsupported model: {cfg._name}")
         self.device = device
 
     def extract_feat(self, input_data, return_layer_outs=False, layer_id=None):
@@ -84,4 +91,4 @@ if __name__ == "__main__":
         feat = model.extract_feat(x)
         print(f"feat shape {feat.shape}")
     
-    load_fairseq_model(HuBERT)
+    load_fairseq_model(XLSR)
