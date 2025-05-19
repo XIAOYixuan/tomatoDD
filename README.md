@@ -2,7 +2,7 @@
 
 This is the official repository for our research work on fake audio detection at the IMS.
 
-This branch (sfm-fad) is for our Interspeech25 paper:
+This branch (interspeech25-layer-wise) is for our Interspeech25 paper:
 
 Layer-Wise Decision Fusion for Fake Audio Detection Using XLS-R
 
