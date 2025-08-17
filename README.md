@@ -34,6 +34,10 @@ The new model pt would be saved in the output directory as ```[output directory]
 
 You can find it at [link](https://huggingface.co/Yixuan/fairseq_models/tree/main)
 
+## data
+
+Important sets and all checkpoints can be found at [link](https://huggingface.co/Yixuan/interspeech25/tree/main)
+
 ## train
 
 The `train.py` script accepts the following parameters for training tasks:
